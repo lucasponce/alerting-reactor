@@ -12,9 +12,39 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+    <reactor.core.version>3.0.5.RELEASE</reactor.core.version>
+    <reactor.netty.version>0.6.2.RELEASE</reactor.netty.version>
+    <log4j.version>2.8.1</log4j.version>
   </properties>
 
   <dependencies>
+
+    <dependency>
+      <groupId>io.projectreactor</groupId>
+      <artifactId>reactor-core</artifactId>
+      <version>${reactor.core.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.projectreactor.ipc</groupId>
+      <artifactId>reactor-netty</artifactId>
+      <version>${reactor.netty.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-api</artifactId>
+      <version>${log4j.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-core</artifactId>
+      <version>${log4j.version}</version>
+    </dependency>
+
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
@@ -22,4 +52,17 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>1.6.0</version>
+        <configuration>
+          <mainClass>org.hawkular.alerting.reactor.AlertingServer</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>
