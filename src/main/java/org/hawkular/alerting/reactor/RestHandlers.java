@@ -1,5 +1,7 @@
 package org.hawkular.alerting.reactor;
 
+import java.util.Properties;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.reactivestreams.Publisher;
@@ -10,11 +12,17 @@ import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
 /**
- * Define logic of Rest Handlers
+ * It is responsible to receive the main HTTP request and route it to the handler.
  */
 public class RestHandlers {
     private static final Logger log = LogManager.getLogger(RestHandlers.class);
     private static final String BASE = "/hawkular/alerts";
+
+    private Properties props;
+
+    public RestHandlers(Properties props) {
+        this.props = props;
+    }
 
     public Publisher<Void> process(HttpServerRequest req, HttpServerResponse resp) {
         QueryStringDecoder query = new QueryStringDecoder(req.uri());

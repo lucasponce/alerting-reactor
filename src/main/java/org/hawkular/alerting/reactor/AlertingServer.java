@@ -24,8 +24,12 @@ public class AlertingServer implements AlertingServerMBean {
     private static final String PROPS_FILE = "alerting.properties";
 
     private Properties props;
+
     private NettyContext context;
+
     private RestHandlers rest;
+    private RulesEngine rules;
+    private PartitionManager partition;
 
     public void setup() {
         log.info("Loading properties");
@@ -57,7 +61,11 @@ public class AlertingServer implements AlertingServerMBean {
         String bindAdress = props.getProperty("bind-address");
         Integer port = Integer.valueOf(props.getProperty("port"));
         log.info("Starting Server at http://{}:{}", bindAdress, port);
-        rest = new RestHandlers();
+        rules = new RulesEngine(props);
+        rules.start();
+        partition = new PartitionManager(props);
+        partition.start();
+        rest = new RestHandlers(props);
         context = HttpServer.create(bindAdress, port)
                 .newRouter(r -> r
                         .route(req -> true, (req, resp) -> rest.process(req, resp)))
@@ -70,8 +78,10 @@ public class AlertingServer implements AlertingServerMBean {
     }
 
     public void stop() {
-        log.info("Stopping Server");
+        partition.stop();
+        rules.stop();
         context.dispose();
+        log.info("Stopping Server");
         System.exit(0);
     }
 
