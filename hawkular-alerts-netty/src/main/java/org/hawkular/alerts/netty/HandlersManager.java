@@ -1,0 +1,93 @@
+package org.hawkular.alerts.netty;
+
+import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
+import static org.hawkular.alerts.api.json.JsonUtil.toJson;
+import static reactor.core.publisher.Mono.just;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+import org.hawkular.alerts.log.MsgLogger;
+import org.hawkular.alerts.netty.util.ResponseUtil.ApiError;
+import org.hawkular.alerts.properties.AlertProperties;
+import org.jboss.logging.Logger;
+import org.reactivestreams.Publisher;
+
+import io.netty.handler.codec.http.QueryStringDecoder;
+import reactor.ipc.netty.http.server.HttpServerRequest;
+import reactor.ipc.netty.http.server.HttpServerResponse;
+
+/**
+ * @author Jay Shaughnessy
+ * @author Lucas Ponce
+ */
+public class HandlersManager {
+    private static final MsgLogger log = Logger.getMessageLogger(MsgLogger.class, HandlersManager.class.getName());
+    private static final String BASE_URL = "hawkular-alerts.base-url";
+    private static final String BASE_URL_DEFAULT = "/hawkular/alerts";
+
+    private String baseUrl = AlertProperties.getProperty(BASE_URL, BASE_URL_DEFAULT);
+    private Map<String, RestHandler> endpoints = new HashMap<>();
+    private ClassLoader cl = Thread.currentThread().getContextClassLoader();
+
+    public void start() {
+        try {
+            scan();
+        } catch (IOException e) {
+            log.error(e.getMessage());
+        }
+    }
+
+    public Publisher<Void> process(HttpServerRequest req, HttpServerResponse resp) {
+        QueryStringDecoder query = new QueryStringDecoder(req.uri());
+        log.infof("route: %s %s\n", query.path(), query.parameters());
+        String path = query.path();
+        if (path.length() >= baseUrl.length()) {
+            String base = query.path().substring(0, baseUrl.length());
+            if (baseUrl.equals(base)) {
+                String endpoint = query.path().substring(baseUrl.length());
+                if (endpoints.get(endpoint) != null) {
+                    return endpoints.get(endpoint).process(req, resp);
+                }
+            }
+        }
+        return resp
+                .status(BAD_REQUEST)
+                .sendString(just(toJson(new ApiError("Endpoint [" + path + "] is not supported."))));
+    }
+
+    private void scan() throws IOException {
+        String[] classpath = System.getProperty("java.class.path").split(":");
+        for (int i=0; i<classpath.length; i++) {
+            if (classpath[i].contains("hawkular") && classpath[i].endsWith("jar")) {
+                ZipInputStream zip = new ZipInputStream(new FileInputStream(classpath[i]));
+                for (ZipEntry entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                    if (!entry.isDirectory() && entry.getName().endsWith(".class")) {
+                        String className = entry.getName().replace('/', '.'); // including ".class"
+                        className = className.substring(0, className.length() - 6);
+                        try {
+                            Class clazz = cl.loadClass(className);
+                            if (clazz.isAnnotationPresent(RestEndpoint.class)) {
+                                RestEndpoint endpoint = (RestEndpoint)clazz.getAnnotation(RestEndpoint.class);
+                                Class[] interfaces = clazz.getInterfaces();
+                                for (int j=0; i<interfaces.length; j++) {
+                                    if (interfaces[j].equals(RestHandler.class)) {
+                                        log.infof("Endpoint %s Handler %s", endpoint.path(), clazz.getName());
+                                        endpoints.put(endpoint.path(), ((RestHandler) clazz.newInstance()));
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.errorf("Error loading Handler %s. Reason: %s", className, e.toString());
+                            System.exit(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
