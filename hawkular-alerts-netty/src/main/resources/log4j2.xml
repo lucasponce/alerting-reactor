@@ -7,6 +7,7 @@
     </Appenders>
     <Loggers>
         <Logger name="com.datastax" level="warn" />
+        <Logger name="infinispan" level="warn" />
         <Logger name="io.netty" level="warn" />
         <Logger name="org.drools" level="warn" />
         <Logger name="org.jboss" level="warn" />

@@ -166,7 +166,7 @@
 
     <dependency>
       <groupId>org.infinispan</groupId>
-      <artifactId>infinispan-core</artifactId>
+      <artifactId>infinispan-embedded</artifactId>
       <version>${version.org.infinispan.wildfly}</version>
     </dependency>
 

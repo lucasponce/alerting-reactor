@@ -74,7 +74,7 @@ public class HandlersManager {
                             if (clazz.isAnnotationPresent(RestEndpoint.class)) {
                                 RestEndpoint endpoint = (RestEndpoint)clazz.getAnnotation(RestEndpoint.class);
                                 Class[] interfaces = clazz.getInterfaces();
-                                for (int j=0; i<interfaces.length; j++) {
+                                for (int j=0; j<interfaces.length; j++) {
                                     if (interfaces[j].equals(RestHandler.class)) {
                                         log.infof("Endpoint %s Handler %s", endpoint.path(), clazz.getName());
                                         endpoints.put(endpoint.path(), ((RestHandler) clazz.newInstance()));
@@ -82,7 +82,7 @@ public class HandlersManager {
                                 }
                             }
                         } catch (Exception e) {
-                            log.errorf("Error loading Handler %s. Reason: %s", className, e.toString());
+                            log.errorf(e,"Error loading Handler %s. Reason: %s", className, e.toString());
                             System.exit(1);
                         }
                     }
