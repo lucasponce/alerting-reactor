@@ -27,7 +27,7 @@
 
   <name>Hawkular Alerting: Netty PoC</name>
   <description>Alerting subsystem for Hawkular</description>
-  <url>https://github.com/hawkular/hawkular-alerts</url>
+  <url>https://github.com/lucasponce/alerting-reactor</url>
   <inceptionYear>2015</inceptionYear>
   <organization>
     <name>Red Hat, Inc.</name>
@@ -51,9 +51,9 @@
   </mailingLists>
 
   <scm>
-    <connection>scm:git:git@github.com:hawkular/hawkular-alerts.git</connection>
-    <developerConnection>scm:git:git@github.com:hawkular/hawkular-alerts.git</developerConnection>
-    <url>https://github.com/hawkular/hawkular-alerts</url>
+    <connection>scm:git:git@github.com:lucasponce/alerting-reactor.git</connection>
+    <developerConnection>scm:git:git@github.com:lucasponce/alerting-reactor.git</developerConnection>
+    <url>https://github.com/lucasponce/alerting-reactor</url>
     <tag>head</tag>
   </scm>
 
@@ -92,8 +92,6 @@
     <version.org.freemarker>2.3.23</version.org.freemarker>
     <version.org.hawkular.commons>0.9.1.Final</version.org.hawkular.commons>
     <version.org.infinispan.wildfly>8.1.0.Final</version.org.infinispan.wildfly>
-    <version.org.infinispan.eap64>5.2.9.Final</version.org.infinispan.eap64>
-    <version.org.jboss.jboss-vfs>3.2.10.Final</version.org.jboss.jboss-vfs>
     <version.org.jboss.logging>3.2.1.Final</version.org.jboss.logging>
     <version.org.jboss.logging.jboss-logging-annotations>2.0.2.Final</version.org.jboss.logging.jboss-logging-annotations>
     <version.org.jboss.logging.jboss-logging-processor>2.0.2.Final</version.org.jboss.logging.jboss-logging-processor>
