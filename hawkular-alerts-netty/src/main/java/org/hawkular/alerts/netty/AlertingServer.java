@@ -4,6 +4,7 @@ import java.lang.management.ManagementFactory;
 
 import javax.management.ObjectName;
 
+import org.hawkular.alerts.actions.standalone.StandaloneActionPluginRegister;
 import org.hawkular.alerts.engine.StandaloneAlerts;
 import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.properties.AlertProperties;
@@ -36,6 +37,7 @@ public class AlertingServer implements AlertingServerMBean {
 
         handlers = new HandlersManager();
         handlers.start();
+        StandaloneActionPluginRegister.start();
         context = HttpServer.create(bindAdress, port)
                 .newRouter(r -> r
                         .route(req -> true, (req, resp) -> handlers.process(req, resp)))
@@ -50,6 +52,7 @@ public class AlertingServer implements AlertingServerMBean {
     public void stop() {
         log.info("Stopping Server");
         context.dispose();
+        StandaloneActionPluginRegister.stop();
         StandaloneAlerts.stop();
         log.info("Server stopped");
         System.exit(0);

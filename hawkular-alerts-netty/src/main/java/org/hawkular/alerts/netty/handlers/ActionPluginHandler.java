@@ -1,17 +1,14 @@
 package org.hawkular.alerts.netty.handlers;
 
+import static io.netty.handler.codec.http.HttpMethod.GET;
 import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
 import static io.netty.handler.codec.http.HttpResponseStatus.INTERNAL_SERVER_ERROR;
 import static io.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static org.hawkular.alerts.api.json.JsonUtil.toJson;
-import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
-import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 import static reactor.core.publisher.Mono.just;
 
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -25,7 +22,7 @@ import org.hawkular.alerts.netty.util.ResponseUtil.ApiError;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
 
-import com.sun.net.httpserver.HttpServer;
+import io.netty.handler.codec.http.HttpMethod;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -49,18 +46,19 @@ public class ActionPluginHandler implements RestHandler {
                                    String tenant,
                                    String subpath,
                                    Map<String, List<String>> params) {
-        // @Path("/")
-        if (subpath.equals("/")) {
+        HttpMethod method = req.method();
+        // GET /
+        if (method == GET && subpath.equals("/")) {
             return findActionPlugins(resp);
         }
-        // @Path("/{actionPlugin}")
-        if (subpath.indexOf('/', 1) == -1) {
+        // GET /{actionPlugin}
+        if (method == GET && subpath.indexOf('/', 1) == -1) {
             String actionPlugin = subpath.substring(1);
             return getActionPlugin(resp, actionPlugin);
         }
         return resp
                 .status(BAD_REQUEST)
-                .sendString(just(toJson(new ApiError("Wrong path " + subpath))));
+                .sendString(just(toJson(new ApiError("Wrong path " + method + " " + subpath))));
     }
 
     Publisher<Void> findActionPlugins(HttpServerResponse resp) {

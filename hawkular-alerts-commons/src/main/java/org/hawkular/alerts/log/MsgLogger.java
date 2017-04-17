@@ -29,7 +29,7 @@ import org.jboss.logging.annotations.ValidIdRange;
  * @author Lucas Ponce
  */
 @MessageLogger(projectCode = "HAWKALERT")
-@ValidIdRange(min = 220000, max = 229999)
+@ValidIdRange(min = 220000, max = 299999)
 public interface MsgLogger extends BasicLogger {
     MsgLogger LOGGER = Logger.getMessageLogger(MsgLogger.class, MsgLogger.class.getPackage().getName());
 
@@ -112,4 +112,49 @@ public interface MsgLogger extends BasicLogger {
     @LogMessage(level = Logger.Level.INFO)
     @Message(id = 220023, value = "Init Actions Cache")
     void infoInitActionsCache();
+
+    @LogMessage(level = Logger.Level.INFO)
+    @Message(id = 240001, value = "Plugin [%s] has received an action message: [%s]")
+    void infoActionReceived(String actionPlugin, String msg);
+
+    @LogMessage(level = Logger.Level.ERROR)
+    @Message(id = 240005, value = "Plugin [%s] cannot process an action message. Error: [%s]")
+    void errorCannotProcessMessage(String actionPlugin, String msg);
+
+    @LogMessage(level = Logger.Level.ERROR)
+    @Message(id = 240006, value = "Plugin [%s] cannot be started. Error: [%s]")
+    void errorCannotBeStarted(String actionPlugin, String msg);
+
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 240007, value = "Plugin [%s] received a message without payload.")
+    void warnMessageReceivedWithoutPayload(String actionPlugin);
+
+    @LogMessage(level = Logger.Level.INFO)
+    @Message(id = 270001, value = "Action plugin [%s] registered")
+    void infoActionPluginRegistration(String actionPlugin);
+
+    @LogMessage(level = Logger.Level.ERROR)
+    @Message(id = 270002, value = "Cannot access to DefinitionsService")
+    void warnCannotAccessToDefinitionsService();
+
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 270003, value = "No ActionPluginListener found on plugin deployment")
+    void warnNoPluginsFound();
+
+    @LogMessage(level = Logger.Level.ERROR)
+    @Message(id = 270004, value = "Error processing action. Description: [%s]")
+    void errorProcessingAction(String msg);
+
+    @LogMessage(level = Logger.Level.ERROR)
+    @Message(id = 270005, value = "Plugin [%s] cannot be registered into the engine. Error: [%s]")
+    void errorCannotRegisterPlugin(String actionPlugin, String msg);
+
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 270007, value = "Plugin received a message without plugin info.")
+    void warnMessageReceivedWithoutPluginInfo();
+
+    @LogMessage(level = Logger.Level.WARN)
+    @Message(id = 270008, value = "ActionResponse message without payload")
+    void warnActionResponseMessageWithoutPayload();
+
 }
