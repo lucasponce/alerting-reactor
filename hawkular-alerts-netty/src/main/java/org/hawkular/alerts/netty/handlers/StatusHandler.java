@@ -5,6 +5,7 @@ import static org.hawkular.alerts.api.json.JsonUtil.toJson;
 import static reactor.core.publisher.Mono.just;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.hawkular.alerts.api.services.StatusService;
@@ -37,7 +38,11 @@ public class StatusHandler implements RestHandler {
     }
 
     @Override
-    public Publisher<Void> process(HttpServerRequest req, HttpServerResponse resp) {
+    public Publisher<Void> process(HttpServerRequest req,
+                                   HttpServerResponse resp,
+                                   String tenant,
+                                   String subpath,
+                                   Map<String, List<String>> params) {
         Map<String, String> status = new HashMap<>();
         status.putAll(manifestUtil.getFrom());
         if (statusService.isStarted()) {

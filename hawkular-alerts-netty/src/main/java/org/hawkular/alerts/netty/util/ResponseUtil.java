@@ -1,5 +1,7 @@
 package org.hawkular.alerts.netty.util;
 
+import org.reactivestreams.Publisher;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
@@ -19,5 +21,9 @@ public class ResponseUtil {
         public String getErrorMsg() {
             return errorMsg;
         }
+    }
+
+    public static boolean isEmpty(String s) {
+        return s == null || s.isEmpty();
     }
 }

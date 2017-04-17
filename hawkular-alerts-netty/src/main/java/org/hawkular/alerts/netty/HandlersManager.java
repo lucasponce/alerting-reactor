@@ -7,6 +7,7 @@ import static reactor.core.publisher.Mono.just;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -29,6 +30,7 @@ public class HandlersManager {
     private static final MsgLogger log = Logger.getMessageLogger(MsgLogger.class, HandlersManager.class.getName());
     private static final String BASE_URL = "hawkular-alerts.base-url";
     private static final String BASE_URL_DEFAULT = "/hawkular/alerts";
+    public static final String TENANT_HEADER_NAME = "Hawkular-Tenant";
 
     private String baseUrl = AlertProperties.getProperty(BASE_URL, BASE_URL_DEFAULT);
     private Map<String, RestHandler> endpoints = new HashMap<>();
@@ -44,20 +46,33 @@ public class HandlersManager {
 
     public Publisher<Void> process(HttpServerRequest req, HttpServerResponse resp) {
         QueryStringDecoder query = new QueryStringDecoder(req.uri());
-        log.infof("route: %s %s\n", query.path(), query.parameters());
         String path = query.path();
+        Map<String, List<String>> params = query.parameters();
+        log.infof("route: %s %s\n", path, params);
         if (path.length() >= baseUrl.length()) {
             String base = query.path().substring(0, baseUrl.length());
             if (baseUrl.equals(base)) {
                 String endpoint = query.path().substring(baseUrl.length());
+                String subpath = endpoint;
+                if (endpoint.lastIndexOf('/') != 0) {
+                    endpoint = endpoint.substring(0, endpoint.indexOf('/', 1));
+                }
+                subpath = subpath.substring(endpoint.length());
+                if (subpath.isEmpty()) {
+                    subpath = "/";
+                }
                 if (endpoints.get(endpoint) != null) {
-                    return endpoints.get(endpoint).process(req, resp);
+                    return endpoints.get(endpoint).process(req, resp, tenant(req), subpath, params);
                 }
             }
         }
         return resp
                 .status(BAD_REQUEST)
                 .sendString(just(toJson(new ApiError("Endpoint [" + path + "] is not supported."))));
+    }
+
+    public String tenant(HttpServerRequest req) {
+        return req.requestHeaders().get(TENANT_HEADER_NAME);
     }
 
     private void scan() throws IOException {
