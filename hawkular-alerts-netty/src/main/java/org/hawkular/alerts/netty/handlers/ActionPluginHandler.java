@@ -6,6 +6,10 @@ import static io.netty.handler.codec.http.HttpResponseStatus.INTERNAL_SERVER_ERR
 import static io.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static org.hawkular.alerts.api.json.JsonUtil.toJson;
+import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
+import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
+import static org.hawkular.alerts.netty.util.ResponseUtil.notFound;
+import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
 import static reactor.core.publisher.Mono.just;
 
 import java.util.Collection;
@@ -33,6 +37,7 @@ import reactor.ipc.netty.http.server.HttpServerResponse;
 @RestEndpoint(path = "/plugins")
 public class ActionPluginHandler implements RestHandler {
     private static final MsgLogger log = Logger.getMessageLogger(MsgLogger.class, ActionPluginHandler.class.getName());
+    private static final String ROOT = "/";
 
     DefinitionsService definitionsService;
 
@@ -43,12 +48,12 @@ public class ActionPluginHandler implements RestHandler {
     @Override
     public Publisher<Void> process(HttpServerRequest req,
                                    HttpServerResponse resp,
-                                   String tenant,
+                                   String tenantId,
                                    String subpath,
                                    Map<String, List<String>> params) {
         HttpMethod method = req.method();
         // GET /
-        if (method == GET && subpath.equals("/")) {
+        if (method == GET && subpath.equals(ROOT)) {
             return findActionPlugins(resp);
         }
         // GET /{actionPlugin}
@@ -56,23 +61,17 @@ public class ActionPluginHandler implements RestHandler {
             String actionPlugin = subpath.substring(1);
             return getActionPlugin(resp, actionPlugin);
         }
-        return resp
-                .status(BAD_REQUEST)
-                .sendString(just(toJson(new ApiError("Wrong path " + method + " " + subpath))));
+        return badRequest(resp, "Wrong path " + method + " " + subpath);
     }
 
     Publisher<Void> findActionPlugins(HttpServerResponse resp) {
         try {
             Collection<String> actionPlugins = definitionsService.getActionPlugins();
             log.debugf("ActionPlugins: %s", actionPlugins);
-            return resp
-                    .status(OK)
-                    .sendString(just(toJson(actionPlugins)));
+            return ok(resp, actionPlugins);
         } catch (Exception e) {
             log.errorf(e, "Error querying all plugins. Reason: %s", e.toString());
-            return resp
-                    .status(INTERNAL_SERVER_ERROR)
-                    .sendString(just(toJson(new ApiError(e.toString()))));
+            return internalServerError(resp, e.toString());
         }
     }
 
@@ -81,18 +80,12 @@ public class ActionPluginHandler implements RestHandler {
             Set<String> actionPluginProps = definitionsService.getActionPlugin(actionPlugin);
             log.debugf("ActionPlugin: %s - Properties: %s", actionPlugin, actionPluginProps);
             if (actionPluginProps == null) {
-                return resp
-                        .status(NOT_FOUND)
-                        .send();
+                return notFound(resp, "Not found action plugin: " + actionPlugin);
             }
-            return resp
-                    .status(OK)
-                    .sendString(just(toJson(actionPluginProps)));
+            return ok(resp, actionPluginProps);
         } catch (Exception e) {
             log.errorf(e, "Error querying plugin %s. Reason: %s", actionPlugin, e.toString());
-            return resp
-                    .status(INTERNAL_SERVER_ERROR)
-                    .sendString(just(toJson(new ApiError(e.toString()))));
+            return internalServerError(resp, e.toString());
         }
     }
 }

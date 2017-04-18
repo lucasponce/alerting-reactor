@@ -1,8 +1,6 @@
 package org.hawkular.alerts.netty;
 
-import static io.netty.handler.codec.http.HttpResponseStatus.BAD_REQUEST;
-import static org.hawkular.alerts.api.json.JsonUtil.toJson;
-import static reactor.core.publisher.Mono.just;
+import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -13,7 +11,6 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import org.hawkular.alerts.log.MsgLogger;
-import org.hawkular.alerts.netty.util.ResponseUtil.ApiError;
 import org.hawkular.alerts.properties.AlertProperties;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
@@ -62,16 +59,14 @@ public class HandlersManager {
                     subpath = "/";
                 }
                 if (endpoints.get(endpoint) != null) {
-                    return endpoints.get(endpoint).process(req, resp, tenant(req), subpath, params);
+                    return endpoints.get(endpoint).process(req, resp, tenantId(req), subpath, params);
                 }
             }
         }
-        return resp
-                .status(BAD_REQUEST)
-                .sendString(just(toJson(new ApiError("Endpoint [" + path + "] is not supported."))));
+        return badRequest(resp, "Endpoint [" + path + "] is not supported.");
     }
 
-    public String tenant(HttpServerRequest req) {
+    public String tenantId(HttpServerRequest req) {
         return req.requestHeaders().get(TENANT_HEADER_NAME);
     }
 

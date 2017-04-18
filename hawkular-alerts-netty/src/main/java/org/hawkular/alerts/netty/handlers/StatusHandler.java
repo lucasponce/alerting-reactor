@@ -2,6 +2,7 @@ package org.hawkular.alerts.netty.handlers;
 
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static org.hawkular.alerts.api.json.JsonUtil.toJson;
+import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
 import static reactor.core.publisher.Mono.just;
 
 import java.util.HashMap;
@@ -40,7 +41,7 @@ public class StatusHandler implements RestHandler {
     @Override
     public Publisher<Void> process(HttpServerRequest req,
                                    HttpServerResponse resp,
-                                   String tenant,
+                                   String tenantId,
                                    String subpath,
                                    Map<String, List<String>> params) {
         Map<String, String> status = new HashMap<>();
@@ -55,8 +56,6 @@ public class StatusHandler implements RestHandler {
         if (distributed) {
             status.putAll(statusService.getDistributedStatus());
         }
-        return resp
-                .status(OK)
-                .sendString(just(toJson(status)));
+        return ok(resp, status);
     }
 }

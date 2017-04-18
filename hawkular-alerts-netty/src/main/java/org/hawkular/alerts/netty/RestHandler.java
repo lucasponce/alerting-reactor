@@ -16,7 +16,7 @@ public interface RestHandler {
 
     Publisher<Void> process(HttpServerRequest req,
                             HttpServerResponse resp,
-                            String tenant,
+                            String tenantId,
                             String subpath,
                             Map<String, List<String>> params);
 }
