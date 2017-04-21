@@ -184,11 +184,10 @@ public class ActionsHandler implements RestHandler {
                 log.debugf("ActionDefinition: %s", actionDefinition);
                 return ok(resp, actionDefinition);
             }
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
         } catch (Exception e) {
             log.debug(e.getMessage(), e);
-            if (e.getCause() != null && e.getCause() instanceof IllegalArgumentException) {
-                return badRequest(resp,"Bad arguments: " + e.getMessage());
-            }
             return internalServerError(resp, e.toString());
         }
     }
@@ -203,11 +202,10 @@ public class ActionsHandler implements RestHandler {
             } else {
                 return notFound(resp, "ActionDefinition: " + actionDefinition + " not found for update");
             }
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
         } catch (Exception e) {
             log.debug(e.getMessage(), e);
-            if (e.getCause() != null && e.getCause() instanceof IllegalArgumentException) {
-                return badRequest(resp,"Bad arguments: " + e.getMessage());
-            }
             return internalServerError(resp, e.toString());
         }
     }
@@ -238,11 +236,10 @@ public class ActionsHandler implements RestHandler {
                 return ok(resp, actionPage);
             }
             return paginatedOk(req, resp, actionPage, uri);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
         } catch (Exception e) {
             log.debug(e.getMessage(), e);
-            if (e.getCause() != null && e.getCause() instanceof IllegalArgumentException) {
-                return badRequest(resp,"Bad arguments: " + e.getMessage());
-            }
             return internalServerError(resp, e.toString());
         }
     }
@@ -255,11 +252,10 @@ public class ActionsHandler implements RestHandler {
             Map<String, String> deleted = new HashMap<>();
             deleted.put("deleted", String.valueOf(numDeleted));
             return ok(resp, deleted);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
         } catch (Exception e) {
             log.debug(e.getMessage(), e);
-            if (e.getCause() != null && e.getCause() instanceof IllegalArgumentException) {
-                return badRequest(resp,"Bad arguments: " + e.getMessage());
-            }
             return internalServerError(resp, e.toString());
         }
     }

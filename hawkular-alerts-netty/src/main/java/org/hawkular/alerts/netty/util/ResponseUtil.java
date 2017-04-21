@@ -10,10 +10,14 @@ import static reactor.core.publisher.Mono.just;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import org.hawkular.alerts.api.model.event.Event;
 import org.hawkular.alerts.api.model.paging.Order;
 import org.hawkular.alerts.api.model.paging.Page;
 import org.hawkular.alerts.api.model.paging.PageContext;
@@ -174,5 +178,53 @@ public class ResponseUtil {
 
     public static boolean isEmpty(Map m) {
         return m == null || m.isEmpty();
+    }
+
+    public static Map<String, String> parseTags(String tags) {
+        if (isEmpty(tags)) {
+            return null;
+        }
+        String[] tagTokens = tags.split(",");
+        Map<String, String> tagsMap = new HashMap<>(tagTokens.length);
+        for (String tagToken : tagTokens) {
+            String[] fields = tagToken.split("\\|");
+            if (fields.length == 2) {
+                tagsMap.put(fields[0], fields[1]);
+            } else {
+                throw new IllegalArgumentException("Invalid Tag Criteria " + Arrays.toString(fields));
+            }
+        }
+        return tagsMap;
+    }
+
+    public static String parseTagQuery(Map<String, String> tags) {
+        if (isEmpty(tags)) {
+            return null;
+        }
+        StringBuilder tagQuery = new StringBuilder();
+        Iterator it = tags.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, String> tag = (Map.Entry<String, String>)it.next();
+            tagQuery.append(tag.getKey());
+            if (!"*".equals(tag.getValue())) {
+                tagQuery.append(" = ").append("'").append(tag.getValue()).append("'");
+            }
+            if (it.hasNext()) {
+                tagQuery.append(" or ");
+            }
+        }
+        return tagQuery.toString();
+    }
+
+    public static boolean checkTags(Event event) {
+        if (isEmpty(event.getTags())) {
+            return true;
+        }
+        for (Map.Entry<String, String> entry : event.getTags().entrySet()) {
+            if (isEmpty(entry.getKey()) || isEmpty(entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
     }
 }

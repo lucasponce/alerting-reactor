@@ -38,6 +38,7 @@ public class HandlersManager {
     public void start() {
         try {
             scan();
+            log.info("Netty Handlers scan finished");
         } catch (IOException e) {
             log.error(e.getMessage());
         }
@@ -91,13 +92,13 @@ public class HandlersManager {
                                 Class[] interfaces = clazz.getInterfaces();
                                 for (int j=0; j<interfaces.length; j++) {
                                     if (interfaces[j].equals(RestHandler.class)) {
-                                        log.infof("Endpoint %s Handler %s", endpoint.path(), clazz.getName());
+                                        log.infof("Endpoint [ %s ] - Handler [%s]", endpoint.path(), clazz.getName());
                                         endpoints.put(endpoint.path(), ((RestHandler) clazz.newInstance()));
                                     }
                                 }
                             }
                         } catch (Exception e) {
-                            log.errorf(e,"Error loading Handler %s. Reason: %s", className, e.toString());
+                            log.errorf(e,"Error loading Handler [%s]. Reason: %s", className, e.toString());
                             System.exit(1);
                         }
                     }

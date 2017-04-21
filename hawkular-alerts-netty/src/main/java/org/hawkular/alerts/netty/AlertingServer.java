@@ -35,6 +35,7 @@ public class AlertingServer implements AlertingServerMBean {
 
         log.infof("Starting Server at http://%s:%s", bindAdress, port);
 
+        StandaloneAlerts.start();
         handlers = new HandlersManager();
         handlers.start();
         StandaloneActionPluginRegister.start();

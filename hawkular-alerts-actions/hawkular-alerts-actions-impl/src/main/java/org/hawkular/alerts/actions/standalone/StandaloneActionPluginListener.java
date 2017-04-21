@@ -109,4 +109,12 @@ public class StandaloneActionPluginListener implements ActionListener {
             return new Thread(r, PREFIX + counter++);
         }
     }
+
+    @Override
+    public String toString() {
+        return new StringBuilder("StandaloneActionPluginListener - [")
+                .append(String.join(",", plugins.keySet()))
+                .append("] plugins")
+                .toString();
+    }
 }

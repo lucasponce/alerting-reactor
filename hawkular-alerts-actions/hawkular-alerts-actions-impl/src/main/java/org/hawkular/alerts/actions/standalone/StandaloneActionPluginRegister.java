@@ -62,14 +62,14 @@ public class StandaloneActionPluginRegister {
                 } else {
                     definitions.addActionPlugin(actionPlugin, properties);
                 }
-                ActionListener actionListener = new StandaloneActionPluginListener(ActionPlugins.getPlugins());
-                actions.addListener(actionListener);
-                actionListeners.add(actionListener);
-                log.infoActionPluginRegistration(actionPlugin);
             } catch (Exception e) {
                 log.errorCannotRegisterPlugin(actionPlugin, e.getMessage());
             }
         }
+        ActionListener actionListener = new StandaloneActionPluginListener(ActionPlugins.getPlugins());
+        actions.addListener(actionListener);
+        actionListeners.add(actionListener);
+        log.info("Actions Plugins registration finished");
     }
 
     public static synchronized void start() {

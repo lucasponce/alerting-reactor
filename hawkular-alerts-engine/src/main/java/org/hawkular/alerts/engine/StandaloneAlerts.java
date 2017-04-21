@@ -177,6 +177,10 @@ public class StandaloneAlerts {
         instance = new StandaloneAlerts();
     }
 
+    public static void start() {
+        init();
+    }
+
     public static void stop() {
         if (instance != null) {
             instance.engine.shutdown();
