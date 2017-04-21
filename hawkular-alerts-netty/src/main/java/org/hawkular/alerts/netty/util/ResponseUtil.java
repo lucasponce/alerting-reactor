@@ -16,6 +16,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.hawkular.alerts.api.model.event.Event;
 import org.hawkular.alerts.api.model.paging.Order;
@@ -226,5 +228,13 @@ public class ResponseUtil {
             }
         }
         return true;
+    }
+
+    public static Set<String> getTenants(String tenantId) {
+        Set<String> tenantIds = new TreeSet<>();
+        for (String t : tenantId.split(",")) {
+            tenantIds.add(t);
+        }
+        return tenantIds;
     }
 }
