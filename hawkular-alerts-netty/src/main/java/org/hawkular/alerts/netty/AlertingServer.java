@@ -38,10 +38,18 @@ public class AlertingServer implements AlertingServerMBean {
         handlers = new HandlersManager();
         handlers.start();
         StandaloneActionPluginRegister.start();
-        context = HttpServer.create(bindAdress, port)
-                .newRouter(r -> r
-                        .route(req -> true, (req, resp) -> handlers.process(req, resp)))
-                .block();
+        try {
+            context = HttpServer.create(bindAdress, port)
+                    .newRouter(r -> r
+                            .route(req -> true, (req, resp) -> handlers.process(req, resp)))
+                    .block();
+        } catch (Exception e) {
+            log.fatal(e);
+            log.fatal("Forcing exit");
+            StandaloneActionPluginRegister.stop();
+            StandaloneAlerts.stop();
+            System.exit(1);
+        }
         context.onClose().block();
     }
 
@@ -51,7 +59,6 @@ public class AlertingServer implements AlertingServerMBean {
 
     public void stop() {
         log.info("Stopping Server");
-        context.dispose();
         StandaloneActionPluginRegister.stop();
         StandaloneAlerts.stop();
         log.info("Server stopped");

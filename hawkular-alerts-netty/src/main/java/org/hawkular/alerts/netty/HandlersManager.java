@@ -1,6 +1,7 @@
 package org.hawkular.alerts.netty;
 
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
+import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -28,6 +29,7 @@ public class HandlersManager {
     private static final String BASE_URL = "hawkular-alerts.base-url";
     private static final String BASE_URL_DEFAULT = "/hawkular/alerts";
     public static final String TENANT_HEADER_NAME = "Hawkular-Tenant";
+    public static final String ROOT = "/";
 
     private String baseUrl = AlertProperties.getProperty(BASE_URL, BASE_URL_DEFAULT);
     private Map<String, RestHandler> endpoints = new HashMap<>();
@@ -51,12 +53,15 @@ public class HandlersManager {
             if (baseUrl.equals(base)) {
                 String endpoint = query.path().substring(baseUrl.length());
                 String subpath = endpoint;
-                if (endpoint.lastIndexOf('/') != 0) {
+                if (endpoint.lastIndexOf('/') > 0) {
                     endpoint = endpoint.substring(0, endpoint.indexOf('/', 1));
                 }
                 subpath = subpath.substring(endpoint.length());
+                if (endpoint.isEmpty()) {
+                    endpoint = ROOT;
+                }
                 if (subpath.isEmpty()) {
-                    subpath = "/";
+                    subpath = ROOT;
                 }
                 if (endpoints.get(endpoint) != null) {
                     return endpoints.get(endpoint).process(req, resp, tenantId(req), subpath, params);
