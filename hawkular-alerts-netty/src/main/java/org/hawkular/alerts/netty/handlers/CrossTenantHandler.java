@@ -45,7 +45,6 @@ import reactor.ipc.netty.http.server.HttpServerResponse;
 @RestEndpoint(path = "/admin")
 public class CrossTenantHandler implements RestHandler {
     private static final MsgLogger log = Logger.getMessageLogger(MsgLogger.class, CrossTenantHandler.class.getName());
-    private static final String ROOT = "/";
     private static final String ALERTS = "/alerts";
     private static final String EVENTS = "/events";
     private static final String WATCH_ALERTS = "/watch/alerts";

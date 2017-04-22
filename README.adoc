@@ -15,7 +15,7 @@ link:http://www.slideshare.net/ponceballesteros/hawkular-alerting[Hawkular Alert
 
 - Netty
 - Reactor
-- Pain jar package
+- Plain jar package
 
 == License
 
