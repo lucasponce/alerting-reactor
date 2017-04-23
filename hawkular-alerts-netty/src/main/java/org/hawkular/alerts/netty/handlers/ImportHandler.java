@@ -53,7 +53,7 @@ public class ImportHandler implements RestHandler {
         // POST /{strategy}
         String[] tokens = subpath.substring(1).split(ROOT);
         if (method == POST && tokens.length == 1) {
-            Definitions definitions = null;
+            Definitions definitions;
             String json = req
                     .receive()
                     .aggregate()

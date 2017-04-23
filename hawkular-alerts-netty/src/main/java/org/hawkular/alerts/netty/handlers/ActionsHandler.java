@@ -83,12 +83,12 @@ public class ActionsHandler implements RestHandler {
         // POST /
         // PUT /
         if ((method == POST || method == PUT) && subpath.equals(ROOT)) {
-            ActionDefinition actionDefinition = null;
             String json = req
                     .receive()
                     .aggregate()
                     .asString()
                     .block();
+            ActionDefinition actionDefinition;
             try {
                 actionDefinition = fromJson(json, ActionDefinition.class);
             } catch (Exception e) {

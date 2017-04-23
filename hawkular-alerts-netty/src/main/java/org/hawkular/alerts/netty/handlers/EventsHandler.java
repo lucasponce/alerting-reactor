@@ -93,7 +93,7 @@ public class EventsHandler implements RestHandler {
                     .aggregate()
                     .asString()
                     .block();
-            Event event = null;
+            Event event;
             try {
                 event = fromJson(json, Event.class);
             } catch (Exception e) {
@@ -109,7 +109,7 @@ public class EventsHandler implements RestHandler {
                     .aggregate()
                     .asString()
                     .block();
-            Collection<Event> events = null;
+            Collection<Event> events;
             try {
                 events = collectionFromJson(json, Event.class);
             } catch (Exception e) {

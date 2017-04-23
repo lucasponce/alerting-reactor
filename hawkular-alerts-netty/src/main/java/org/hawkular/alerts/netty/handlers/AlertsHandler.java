@@ -136,7 +136,7 @@ public class AlertsHandler implements RestHandler {
                     .aggregate()
                     .asString()
                     .block();
-            Collection<Data> datums = null;
+            Collection<Data> datums;
             try {
                 datums = collectionFromJson(json, Data.class);
             } catch (Exception e) {

@@ -1,7 +1,6 @@
 package org.hawkular.alerts.netty;
 
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
-import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 
 import java.io.FileInputStream;
 import java.io.IOException;
