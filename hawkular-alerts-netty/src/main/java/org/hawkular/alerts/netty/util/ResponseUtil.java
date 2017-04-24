@@ -5,10 +5,8 @@ import static io.netty.handler.codec.http.HttpResponseStatus.INTERNAL_SERVER_ERR
 import static io.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static org.hawkular.alerts.api.json.JsonUtil.toJson;
-import static reactor.core.publisher.Mono.create;
 import static reactor.core.publisher.Mono.just;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -19,11 +17,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
+import org.hawkular.alerts.api.json.GroupMemberInfo;
+import org.hawkular.alerts.api.json.UnorphanMemberInfo;
+import org.hawkular.alerts.api.model.dampening.Dampening;
 import org.hawkular.alerts.api.model.event.Event;
 import org.hawkular.alerts.api.model.paging.Order;
 import org.hawkular.alerts.api.model.paging.Page;
 import org.hawkular.alerts.api.model.paging.PageContext;
 import org.hawkular.alerts.api.model.paging.Pager;
+import org.hawkular.alerts.api.model.trigger.Trigger;
 import org.reactivestreams.Publisher;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -219,10 +221,26 @@ public class ResponseUtil {
     }
 
     public static boolean checkTags(Event event) {
-        if (isEmpty(event.getTags())) {
+        return checkTags(event.getTags());
+    }
+
+    public static boolean checkTags(Trigger trigger) {
+        return checkTags(trigger.getTags());
+    }
+
+    public static boolean checkTags(GroupMemberInfo groupMemberInfo) {
+        return checkTags(groupMemberInfo.getMemberTags());
+    }
+
+    public static boolean checkTags(UnorphanMemberInfo groupMemberInfo) {
+        return checkTags(groupMemberInfo.getMemberTags());
+    }
+
+    private static boolean checkTags(Map<String, String> tagsMap) {
+        if (isEmpty(tagsMap)) {
             return true;
         }
-        for (Map.Entry<String, String> entry : event.getTags().entrySet()) {
+        for (Map.Entry<String, String> entry : tagsMap.entrySet()) {
             if (isEmpty(entry.getKey()) || isEmpty(entry.getValue())) {
                 return false;
             }
@@ -236,5 +254,36 @@ public class ResponseUtil {
             tenantIds.add(t);
         }
         return tenantIds;
+    }
+
+    public static Dampening getCleanDampening(Dampening dampening) throws Exception {
+        switch (dampening.getType()) {
+            case STRICT:
+                return Dampening.forStrict(dampening.getTenantId(), dampening.getTriggerId(),
+                        dampening.getTriggerMode(),
+                        dampening.getEvalTrueSetting());
+
+            case STRICT_TIME:
+                return Dampening.forStrictTime(dampening.getTenantId(), dampening.getTriggerId(),
+                        dampening.getTriggerMode(),
+                        dampening.getEvalTimeSetting());
+
+            case STRICT_TIMEOUT:
+                return Dampening.forStrictTimeout(dampening.getTenantId(), dampening.getTriggerId(),
+                        dampening.getTriggerMode(),
+                        dampening.getEvalTimeSetting());
+            case RELAXED_COUNT:
+                return Dampening.forRelaxedCount(dampening.getTenantId(), dampening.getTriggerId(),
+                        dampening.getTriggerMode(),
+                        dampening.getEvalTrueSetting(),
+                        dampening.getEvalTotalSetting());
+            case RELAXED_TIME:
+                return Dampening.forRelaxedTime(dampening.getTenantId(), dampening.getTriggerId(),
+                        dampening.getTriggerMode(),
+                        dampening.getEvalTrueSetting(), dampening.getEvalTimeSetting());
+
+            default:
+                throw new Exception("Unhandled Dampening Type: " + dampening.toString());
+        }
     }
 }

@@ -8,21 +8,38 @@ import static org.hawkular.alerts.api.json.JsonUtil.collectionFromJson;
 import static org.hawkular.alerts.api.json.JsonUtil.fromJson;
 import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
+import static org.hawkular.alerts.netty.util.ResponseUtil.checkTags;
+import static org.hawkular.alerts.netty.util.ResponseUtil.extractPaging;
+import static org.hawkular.alerts.netty.util.ResponseUtil.getCleanDampening;
+import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
 import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
+import static org.hawkular.alerts.netty.util.ResponseUtil.notFound;
+import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
+import static org.hawkular.alerts.netty.util.ResponseUtil.paginatedOk;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
+import org.hawkular.alerts.api.exception.NotFoundException;
 import org.hawkular.alerts.api.json.GroupConditionsInfo;
 import org.hawkular.alerts.api.json.GroupMemberInfo;
 import org.hawkular.alerts.api.json.UnorphanMemberInfo;
 import org.hawkular.alerts.api.model.condition.Condition;
 import org.hawkular.alerts.api.model.dampening.Dampening;
+import org.hawkular.alerts.api.model.paging.Page;
+import org.hawkular.alerts.api.model.paging.Pager;
 import org.hawkular.alerts.api.model.trigger.FullTrigger;
 import org.hawkular.alerts.api.model.trigger.Mode;
 import org.hawkular.alerts.api.model.trigger.Trigger;
 import org.hawkular.alerts.api.services.DefinitionsService;
+import org.hawkular.alerts.api.services.TriggersCriteria;
 import org.hawkular.alerts.engine.StandaloneAlerts;
 import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.netty.RestEndpoint;
@@ -51,11 +68,18 @@ public class TriggersHandler implements RestHandler {
     private static final String MODE = "mode";
     private static final String CONDITIONS = "conditions";
     private static final String ENABLED = "enabled";
+    private static final String PARAM_KEEP_NON_ORPHANS = "keepNonOrphans";
+    private static final String PARAM_KEEP_ORPHANS = "keepOrphans";
+    private static final String PARAM_INCLUDE_ORPHANS = "includeOrphans";
+    private static final String PARAM_TRIGGER_IDS = "triggerIds";
+    private static final String PARAM_TAGS = "tags";
+    private static final String PARAM_THIN = "thin";
+    private static final String PARAM_ENABLED = "enabled";
 
-    DefinitionsService definitions;
+    DefinitionsService definitionsService;
 
     public TriggersHandler() {
-        definitions = StandaloneAlerts.getDefinitionsService();
+        definitionsService = StandaloneAlerts.getDefinitionsService();
     }
 
     @Override
@@ -244,7 +268,7 @@ public class TriggersHandler implements RestHandler {
         }
         // GET /groups/{groupId}/members
         if (method == GET && tokens.length == 3 && GROUPS.equals(tokens[0]) && MEMBERS.equals(tokens[2])) {
-            return findGroupMembers(req, resp, tenantId, tokens[1], params, req.uri());
+            return findGroupMembers(resp, tenantId, tokens[1], params);
         }
         // POST /groups/{groupId}/dampenings
         if (method == POST && tokens.length == 3 && GROUPS.equals(tokens[0]) && DAMPENINGS.equals(tokens[2])) {
@@ -380,82 +404,532 @@ public class TriggersHandler implements RestHandler {
     }
 
     Publisher<Void> createDampening(HttpServerResponse resp, String tenantId, String triggerId, Dampening dampening, boolean isGroupTrigger) {
-        return null;
+        try {
+            dampening.setTenantId(tenantId);
+            dampening.setTriggerId(triggerId);
+            boolean exists = (definitionsService.getDampening(tenantId, dampening.getDampeningId()) != null);
+            if (!exists) {
+                Dampening d = getCleanDampening(dampening);
+                if (!isGroupTrigger) {
+                    definitionsService.addDampening(tenantId, d);
+                } else {
+                    definitionsService.addGroupDampening(tenantId, d);
+                }
+                log.debugf("Dampening: %s", dampening);
+                return ok(resp, d);
+            }
+            return badRequest(resp,"Existing dampening for dampeningId: " + dampening.getDampeningId());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> createFullTrigger(HttpServerResponse resp, String tenantId, FullTrigger fullTrigger) {
-        return null;
+        try {
+            if (fullTrigger.getTrigger() == null) {
+                return badRequest(resp,"Trigger is empty");
+            }
+            Trigger trigger = fullTrigger.getTrigger();
+            trigger.setTenantId(tenantId);
+            if (isEmpty(trigger.getId())) {
+                trigger.setId(Trigger.generateId());
+            } else if (definitionsService.getTrigger(tenantId, trigger.getId()) != null) {
+                return badRequest(resp, "Trigger with ID [" + trigger.getId() + "] exists.");
+            }
+            if (!checkTags(trigger)) {
+                return badRequest(resp,"Tags " + trigger.getTags() + " must be non empty.");
+            }
+            definitionsService.addTrigger(tenantId, trigger);
+            log.debugf("Trigger: %s", trigger);
+            for (Dampening dampening : fullTrigger.getDampenings()) {
+                dampening.setTenantId(tenantId);
+                dampening.setTriggerId(trigger.getId());
+                boolean exist = (definitionsService.getDampening(tenantId, dampening.getDampeningId()) != null);
+                if (exist) {
+                    definitionsService.removeDampening(tenantId, dampening.getDampeningId());
+                }
+                definitionsService.addDampening(tenantId, dampening);
+                log.debugf("Dampening: %s", dampening);
+            }
+            fullTrigger.getConditions().stream().forEach(c -> {
+                c.setTenantId(tenantId);
+                c.setTriggerId(trigger.getId());
+            });
+            List<Condition> firingConditions = fullTrigger.getConditions().stream()
+                    .filter(c -> c.getTriggerMode() == Mode.FIRING)
+                    .collect(Collectors.toList());
+            if (firingConditions != null && !firingConditions.isEmpty()) {
+                definitionsService.setConditions(tenantId, trigger.getId(), Mode.FIRING, firingConditions);
+                log.debugf("Conditions: %s", firingConditions);
+            }
+            List<Condition> autoResolveConditions = fullTrigger.getConditions().stream()
+                    .filter(c -> c.getTriggerMode() == Mode.AUTORESOLVE)
+                    .collect(Collectors.toList());
+            if (autoResolveConditions != null && !autoResolveConditions.isEmpty()) {
+                definitionsService.setConditions(tenantId, trigger.getId(), Mode.AUTORESOLVE, autoResolveConditions);
+                log.debugf("Conditions: %s", autoResolveConditions);
+            }
+            return ok(resp, fullTrigger);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> createGroupMember(HttpServerResponse resp, String tenantId, GroupMemberInfo groupMember) {
-        return null;
+        try {
+            String groupId = groupMember.getGroupId();
+            if (isEmpty(groupId)) {
+                return badRequest(resp, "MemberTrigger groupId is null");
+            }
+            if (!checkTags(groupMember)) {
+                return badRequest(resp, "Tags " + groupMember.getMemberTags() + " must be non empty.");
+            }
+            Trigger child = definitionsService.addMemberTrigger(tenantId, groupId, groupMember.getMemberId(),
+                    groupMember.getMemberName(),
+                    groupMember.getMemberDescription(),
+                    groupMember.getMemberContext(),
+                    groupMember.getMemberTags(),
+                    groupMember.getDataIdMap());
+            log.debugf("Child Trigger: %s", child);
+            return ok(resp, child);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> createTrigger(HttpServerResponse resp, String tenantId, Trigger trigger, boolean isGroupTrigger) {
-        return null;
+        try {
+            if (isEmpty(trigger.getId())) {
+                trigger.setId(Trigger.generateId());
+            } else if (definitionsService.getTrigger(tenantId, trigger.getId()) != null) {
+                return badRequest(resp, "Trigger with ID [" + trigger.getId() + "] exists.");
+            }
+            if (!checkTags(trigger)) {
+                return badRequest(resp, "Tags " + trigger.getTags() + " must be non empty.");
+            }
+            definitionsService.addTrigger(tenantId, trigger);
+            log.debugf("Trigger: %s", trigger);
+            return ok(resp, trigger);
+
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> deleteDampening(HttpServerResponse resp, String tenantId, String triggerId, String dampeningId, boolean isGroupTrigger) {
-        return null;
+        try {
+            boolean exists = (definitionsService.getDampening(tenantId, dampeningId) != null);
+            if (exists) {
+                if (!isGroupTrigger) {
+                    definitionsService.removeDampening(tenantId, dampeningId);
+                } else {
+                    definitionsService.removeGroupDampening(tenantId, dampeningId);
+                }
+                log.debugf("DampeningId: %s", dampeningId);
+                return ok(resp);
+            }
+            return notFound(resp, "Dampening " + dampeningId + " not found for triggerId: " + triggerId);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> deleteGroupTrigger(HttpServerResponse resp, String tenantId, String groupId, Map<String, List<String>> params) {
-        return null;
+        try {
+            boolean keepNonOrphans = false;
+            if (params.get(PARAM_KEEP_NON_ORPHANS) != null) {
+                keepNonOrphans = Boolean.valueOf(params.get(PARAM_KEEP_NON_ORPHANS).get(0));
+            }
+            boolean keepOrphans = false;
+            if (params.get(PARAM_KEEP_ORPHANS) != null) {
+                keepOrphans = Boolean.valueOf(params.get(PARAM_KEEP_ORPHANS).get(0));
+            }
+            definitionsService.removeGroupTrigger(tenantId, groupId, keepNonOrphans, keepOrphans);
+            if (log.isDebugEnabled()) {
+                log.debugf("Remove Group Trigger: %s / %s", tenantId, groupId);
+            }
+            return ok(resp);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> deleteTrigger(HttpServerResponse resp, String tenantId, String triggerId) {
-        return null;
+        try {
+            definitionsService.removeTrigger(tenantId, triggerId);
+            log.debugf("TriggerId: %s", triggerId);
+            return ok(resp);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
-    Publisher<Void> findGroupMembers(HttpServerRequest req, HttpServerResponse resp, String tenantId, String groupId, Map<String, List<String>> params, String uri) {
-        return null;
+    Publisher<Void> findGroupMembers(HttpServerResponse resp, String tenantId, String groupId, Map<String, List<String>> params) {
+        try {
+            boolean includeOrphans = false;
+            if (params.get(PARAM_INCLUDE_ORPHANS) != null) {
+                includeOrphans = Boolean.valueOf(params.get(PARAM_INCLUDE_ORPHANS).get(0));
+            }
+            Collection<Trigger> members = definitionsService.getMemberTriggers(tenantId, groupId, includeOrphans);
+            log.debugf("Member Triggers: %s", members);
+            return ok(resp, members);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> findTriggers(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params, String uri) {
-        return null;
+        try {
+            Pager pager = extractPaging(params);
+            TriggersCriteria criteria = buildCriteria(params);
+            Page<Trigger> triggerPage = definitionsService.getTriggers(tenantId, criteria, pager);
+            log.debugf("Triggers: %s", triggerPage);
+            if (isEmpty(triggerPage)) {
+                return ok(resp, triggerPage);
+            }
+            return paginatedOk(req, resp, triggerPage, uri);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> getDampening(HttpServerResponse resp, String tenantId, String triggerId, String dampeningId) {
-        return null;
+        try {
+            Dampening found = definitionsService.getDampening(tenantId, dampeningId);
+            if (found == null) {
+                return notFound(resp, "No dampening found for triggerId: " + triggerId + " and dampeningId:" +
+                        dampeningId);
+            }
+            return ok(resp, found);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> getTrigger(HttpServerResponse resp, String tenantId, String triggerId, boolean isFullTrigger) {
-        return null;
+        try {
+            Trigger found = definitionsService.getTrigger(tenantId, triggerId);
+            if (found == null) {
+                return notFound(resp, "triggerId: " + triggerId + " not found");
+            }
+            log.debugf("Trigger: %s", found);
+            if (isFullTrigger) {
+                    List<Dampening> dampenings = new ArrayList<>(definitionsService.getTriggerDampenings(tenantId, found.getId(), null));
+                    List<Condition> conditions = new ArrayList<>(definitionsService.getTriggerConditions(tenantId, found.getId(), null));
+                    FullTrigger fullTrigger = new FullTrigger(found, dampenings, conditions);
+                    return ok(resp, fullTrigger);
+            }
+            return ok(resp, found);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> getTriggerConditions(HttpServerResponse resp, String tenantId, String triggerId) {
-        return null;
+        try {
+            Collection<Condition> conditions = definitionsService.getTriggerConditions(tenantId, triggerId, null);
+            log.debugf("Conditions: %s", conditions);
+            return ok(resp, conditions);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> getTriggerDampenings(HttpServerResponse resp, String tenantId, String triggerId, Mode triggerMode) {
-        return null;
+        try {
+            Collection<Dampening> dampenings = definitionsService.getTriggerDampenings(tenantId, triggerId, triggerMode);
+            log.debug("Dampenings: " + dampenings);
+            return ok(resp, dampenings);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> updateTrigger(HttpServerResponse resp, String tenantId, String triggerId, Trigger trigger, boolean isGroupTrigger) {
-        return null;
+        try {
+            if (trigger != null && !isEmpty(triggerId)) {
+                trigger.setId(triggerId);
+            }
+            if (!checkTags(trigger)) {
+                return badRequest(resp, "Tags " + trigger.getTags() + " must be non empty.");
+            }
+            if (isGroupTrigger) {
+                definitionsService.updateGroupTrigger(tenantId, trigger);
+            } else {
+                definitionsService.updateTrigger(tenantId, trigger);
+            }
+            log.debugf("Trigger: %s", trigger);
+            return ok(resp);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> orphanMemberTrigger(HttpServerResponse resp, String tenantId, String memberId) {
-        return null;
+        try {
+            Trigger child = definitionsService.orphanMemberTrigger(tenantId, memberId);
+            log.debugf("Orphan Member Trigger: %s", child);
+            return ok(resp);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> updateDampening(HttpServerResponse resp, String tenantId, String triggerId, String dampeningId, Dampening dampening, boolean isGroupTrigger) {
-        return null;
+        try {
+            boolean exists = (definitionsService.getDampening(tenantId, dampeningId) != null);
+            if (exists) {
+                dampening.setTriggerId(triggerId);
+                Dampening d = getCleanDampening(dampening);
+                log.debugf("Dampening: %s", d);
+                if (isGroupTrigger) {
+                    definitionsService.updateGroupDampening(tenantId, d);
+                } else {
+                    definitionsService.updateDampening(tenantId, d);
+                }
+            }
+            return notFound(resp, "No dampening found for dampeningId: " + dampeningId);
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> unorphanMemberTrigger(HttpServerResponse resp, String tenantId, String memberId, UnorphanMemberInfo unorphanMemberInfo) {
-        return null;
+        try {
+            if (!checkTags(unorphanMemberInfo)) {
+                return badRequest(resp, "Tags " + unorphanMemberInfo.getMemberTags() + " must be non empty.");
+            }
+            Trigger child = definitionsService.unorphanMemberTrigger(tenantId, memberId,
+                    unorphanMemberInfo.getMemberContext(),
+                    unorphanMemberInfo.getMemberTags(),
+                    unorphanMemberInfo.getDataIdMap());
+            log.debugf("Member Trigger: %s",child);
+            return ok(resp);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> setConditions(HttpServerResponse resp, String tenantId, String triggerId, String triggerMode, Collection<Condition> conditions) {
-        return null;
+        try {
+            Collection<Condition> updatedConditions;
+            if (triggerMode == null) {
+                updatedConditions = new HashSet<>();
+                conditions.stream().forEach(c -> c.setTriggerId(triggerId));
+                Collection<Condition> firingConditions = conditions.stream()
+                        .filter(c -> c.getTriggerMode() == null || c.getTriggerMode().equals(Mode.FIRING))
+                        .collect(Collectors.toList());
+                updatedConditions.addAll(definitionsService.setConditions(tenantId, triggerId, Mode.FIRING, firingConditions));
+                Collection<Condition> autoResolveConditions = conditions.stream()
+                        .filter(c -> c.getTriggerMode().equals(Mode.AUTORESOLVE))
+                        .collect(Collectors.toList());
+                updatedConditions.addAll(definitionsService.setConditions(tenantId, triggerId, Mode.AUTORESOLVE,
+                        autoResolveConditions));
+                log.debugf("Conditions: %s", updatedConditions);
+                return ok(resp, updatedConditions);
+            }
+            Mode mode = Mode.valueOf(triggerMode.toUpperCase());
+            if (!isEmpty(conditions)) {
+                for (Condition condition : conditions) {
+                    condition.setTriggerId(triggerId);
+                    if (condition.getTriggerMode() == null || !condition.getTriggerMode().equals(mode)) {
+                        return badRequest(resp,"Condition: " + condition + " has a different triggerMode [" + triggerMode + "]");
+                    }
+                }
+            }
+            updatedConditions = definitionsService.setConditions(tenantId, triggerId, mode, conditions);
+            return ok(resp, updatedConditions);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> setGroupConditions(HttpServerResponse resp, String tenantId, String groupId, String triggerMode, GroupConditionsInfo groupConditionsInfo) {
-        return null;
+        try {
+            Collection<Condition> updatedConditions = new HashSet<>();
+            if (groupConditionsInfo == null) {
+                return badRequest(resp, "GroupConditionsInfo must be non null.");
+            }
+            if (groupConditionsInfo.getConditions() == null) {
+                groupConditionsInfo.setConditions(Collections.EMPTY_LIST);
+            }
+            for (Condition condition : groupConditionsInfo.getConditions()) {
+                if (condition == null) {
+                    return badRequest(resp,"GroupConditionsInfo must have non null conditions: " + groupConditionsInfo);
+                }
+                condition.setTriggerId(groupId);
+            }
+            if (triggerMode == null) {
+                Collection<Condition> firingConditions = groupConditionsInfo.getConditions().stream()
+                        .filter(c -> c.getTriggerMode() == null || c.getTriggerMode().equals(Mode.FIRING))
+                        .collect(Collectors.toList());
+                updatedConditions.addAll(definitionsService.setGroupConditions(tenantId, groupId, Mode.FIRING, firingConditions,
+                        groupConditionsInfo.getDataIdMemberMap()));
+                Collection<Condition> autoResolveConditions = groupConditionsInfo.getConditions().stream()
+                        .filter(c -> c.getTriggerMode().equals(Mode.AUTORESOLVE))
+                        .collect(Collectors.toList());
+                updatedConditions.addAll(definitionsService.setGroupConditions(tenantId, groupId, Mode.AUTORESOLVE,
+                        autoResolveConditions,
+                        groupConditionsInfo.getDataIdMemberMap()));
+                log.debugf("Conditions: %s", updatedConditions);
+                return ok(resp, updatedConditions);
+            }
+            Mode mode = Mode.valueOf(triggerMode.toUpperCase());
+            for (Condition condition : groupConditionsInfo.getConditions()) {
+                if (condition == null) {
+                    return badRequest(resp, "GroupConditionsInfo must have non null conditions: " + groupConditionsInfo);
+                }
+                condition.setTriggerId(groupId);
+                if (condition.getTriggerMode() == null || !condition.getTriggerMode().equals(mode)) {
+                    return badRequest(resp, "Condition: " + condition + " has a different triggerMode [" + triggerMode + "]");
+                }
+            }
+            updatedConditions = definitionsService.setGroupConditions(tenantId, groupId, mode,
+                    groupConditionsInfo.getConditions(),
+                    groupConditionsInfo.getDataIdMemberMap());
+            log.debugf("Conditions: %s", updatedConditions);
+            return ok(resp, updatedConditions);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
     }
 
     Publisher<Void> setTriggersEnabled(HttpServerResponse resp, String tenantId, Map<String, List<String>> params, boolean isGroupTrigger) {
-        return null;
+        try {
+            String triggerIds = null;
+            Boolean enabled = null;
+            if (params.get(PARAM_TRIGGER_IDS) != null) {
+                triggerIds = params.get(PARAM_TRIGGER_IDS).get(0);
+            }
+            if (params.get(PARAM_ENABLED) != null) {
+                enabled = Boolean.valueOf(params.get(PARAM_ENABLED).get(0));
+            }
+            if (isEmpty(triggerIds)) {
+                return badRequest(resp, "TriggerIds must be non empty.");
+            }
+            if (null == enabled) {
+                return badRequest(resp, "Enabled must be non-empty.");
+            }
+            definitionsService.updateTriggerEnablement(tenantId, triggerIds, enabled);
+            return ok(resp);
+        } catch (NotFoundException e) {
+            return notFound(resp, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return badRequest(resp,"Bad arguments: " + e.getMessage());
+        } catch (Exception e) {
+            log.debug(e.getMessage(), e);
+            return internalServerError(resp, e.toString());
+        }
+    }
+
+    TriggersCriteria buildCriteria(Map<String, List<String>> params) {
+        String triggerIds = null;
+        String tags = null;
+        boolean thin = false;
+
+        if (params.get(PARAM_TRIGGER_IDS) != null) {
+            triggerIds = params.get(PARAM_TRIGGER_IDS).get(0);
+        }
+        if (params.get(PARAM_TAGS) != null) {
+            tags = params.get(PARAM_TAGS).get(0);
+        }
+        if (params.get(PARAM_THIN) != null) {
+            thin = Boolean.valueOf(params.get(PARAM_THIN).get(0));
+        }
+
+        TriggersCriteria criteria = new TriggersCriteria();
+        if (!isEmpty(triggerIds)) {
+            criteria.setTriggerIds(Arrays.asList(triggerIds.split(",")));
+        }
+        if (!isEmpty(tags)) {
+            String[] tagTokens = tags.split(",");
+            Map<String, String> tagsMap = new HashMap<>(tagTokens.length);
+            for (String tagToken : tagTokens) {
+                String[] fields = tagToken.split("\\|");
+                if (fields.length == 2) {
+                    tagsMap.put(fields[0], fields[1]);
+                } else {
+                    if (log.isDebugEnabled()) {
+                        log.debugf("Invalid Tag Criteria %s", Arrays.toString(fields));
+                    }
+                    throw new IllegalArgumentException( "Invalid Tag Criteria " + Arrays.toString(fields) );
+                }
+            }
+            criteria.setTags(tagsMap);
+        }
+        criteria.setThin(thin);
+
+        return criteria;
     }
 }
