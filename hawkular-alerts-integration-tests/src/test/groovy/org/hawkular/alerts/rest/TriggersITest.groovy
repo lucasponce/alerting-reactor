@@ -16,6 +16,8 @@
  */
 package org.hawkular.alerts.rest
 
+import groovyx.net.http.ContentType
+import groovyx.net.http.RESTClient
 import org.hawkular.alerts.api.json.GroupConditionsInfo
 import org.hawkular.alerts.api.json.GroupMemberInfo
 import org.hawkular.alerts.api.json.UnorphanMemberInfo
@@ -41,6 +43,23 @@ import static org.junit.Assert.assertNotNull
 class TriggersITest extends AbstractITestBase {
 
     static Logger logger = LoggerFactory.getLogger(TriggersITest.class)
+
+    @Test
+    void testFailingEndPoint() {
+        def client = new RESTClient(baseURI, ContentType.JSON)
+        client.handler.failure = { it }
+        client.headers.put("Hawkular-Tenant", testTenant)
+
+        def resp = client.delete(path: "triggers/failing-test")
+        assert(200 == resp.status || 404 == resp.status)
+
+        Trigger testTrigger = new Trigger("failing-test", "No-Metric");
+        resp = client.post(path: "triggers", body: testTrigger)
+        assert(200 == resp.status || 404 == resp.status)
+
+        resp = client.post(path: "triggers", body: testTrigger)
+        assertEquals(200, resp.status)
+    }
 
     @Test
     void createTrigger() {

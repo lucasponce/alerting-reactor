@@ -96,11 +96,11 @@ public class TriggersHandler implements RestHandler {
         String[] tokens = subpath.substring(1).split(ROOT);
 
         // GET /
-        if (method == GET && tokens.length == 0) {
+        if (method == GET && subpath.equals(ROOT)) {
             return findTriggers(req, resp, tenantId, params, req.uri());
         }
         // POST /
-        if (method == POST && tokens.length == 0) {
+        if (method == POST && subpath.equals(ROOT)) {
             String json = req
                     .receive()
                     .aggregate()

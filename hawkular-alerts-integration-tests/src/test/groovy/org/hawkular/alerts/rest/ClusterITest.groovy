@@ -18,17 +18,14 @@ package org.hawkular.alerts.rest
 
 import org.hawkular.alerts.api.model.condition.AvailabilityCondition
 import org.hawkular.alerts.api.model.condition.Condition
-import org.hawkular.alerts.api.model.condition.ThresholdCondition
 import org.hawkular.alerts.api.model.data.Data
 import org.hawkular.alerts.api.model.trigger.Mode
 import org.hawkular.alerts.api.model.trigger.Trigger
-import org.hawkular.alerts.api.model.trigger.TriggerAction
 import org.junit.Test
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import static org.junit.Assert.assertEquals
-import static org.junit.Assert.assertTrue
 
 /**
  * Cluster REST tests.

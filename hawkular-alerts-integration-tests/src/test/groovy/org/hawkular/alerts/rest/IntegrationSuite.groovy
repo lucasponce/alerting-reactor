@@ -35,7 +35,6 @@ import org.junit.runners.Suite;
         AlertsITest.class,
         ClusterITest.class,
         ConditionsITest.class,
-        CORSITest.class,
         CrossTenantITest.class,
         DampeningITest.class,
         EventsITest.class,

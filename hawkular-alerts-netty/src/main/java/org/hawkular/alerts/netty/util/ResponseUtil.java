@@ -38,6 +38,9 @@ import reactor.ipc.netty.http.server.HttpServerResponse;
  * @author Lucas Ponce
  */
 public class ResponseUtil {
+    public final static String ACCEPT = "Accept";
+    public final static String CONTENT_TYPE = "Content-Type";
+    public final static String APPLICATION_JSON = "application/json";
 
     public static class ApiError {
         @JsonInclude
@@ -54,36 +57,48 @@ public class ResponseUtil {
 
     public static Publisher<Void> badRequest(HttpServerResponse resp, String errorMsg) {
         return resp
+                .addHeader(ACCEPT, APPLICATION_JSON)
+                .addHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .status(BAD_REQUEST)
                 .sendString(just(toJson(new ApiError(errorMsg))));
     }
 
     public static Publisher<Void> internalServerError(HttpServerResponse resp, String errorMsg) {
         return resp
+                .addHeader(ACCEPT, APPLICATION_JSON)
+                .addHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .status(INTERNAL_SERVER_ERROR)
                 .sendString(just(toJson(new ApiError(errorMsg))));
     }
 
     public static Publisher<Void> notFound(HttpServerResponse resp, String errorMsg) {
         return resp
+                .addHeader(ACCEPT, APPLICATION_JSON)
+                .addHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .status(NOT_FOUND)
                 .sendString(just(toJson(new ApiError(errorMsg))));
     }
 
     public static Publisher<Void> ok(HttpServerResponse resp, Object o) {
         return resp
+                .addHeader(ACCEPT, APPLICATION_JSON)
+                .addHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .status(OK)
                 .sendString(just(toJson(o)));
     }
 
     public static Publisher<Void> ok(HttpServerResponse resp) {
         return resp
+                .addHeader(ACCEPT, APPLICATION_JSON)
+                .addHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .status(OK)
                 .send();
     }
 
     public static <T> Publisher<Void> paginatedOk(HttpServerRequest req, HttpServerResponse resp, Page<T> page, String uri) {
         return resp
+                .addHeader(ACCEPT, APPLICATION_JSON)
+                .addHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .status(OK)
                 .headers(createPagingHeaders(req.requestHeaders(), page, uri))
                 .sendString(just(toJson(page)));

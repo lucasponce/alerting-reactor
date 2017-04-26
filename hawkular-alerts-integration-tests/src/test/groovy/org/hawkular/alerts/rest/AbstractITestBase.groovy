@@ -22,8 +22,6 @@ import org.junit.BeforeClass
 
 import groovyx.net.http.ContentType
 import groovyx.net.http.RESTClient
-import groovyx.net.http.HttpResponseDecorator
-import groovyx.net.http.HttpResponseException
 
 import java.util.concurrent.atomic.AtomicInteger
 

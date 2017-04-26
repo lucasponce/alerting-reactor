@@ -23,14 +23,12 @@ import org.hawkular.alerts.api.model.event.EventCategory
 import org.hawkular.alerts.api.model.event.EventType
 import org.hawkular.alerts.api.model.trigger.Mode
 import org.hawkular.alerts.api.model.trigger.Trigger
-import org.hawkular.alerts.api.model.trigger.TriggerType
 import org.junit.FixMethodOrder
 import org.junit.Test
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 import static org.junit.Assert.assertEquals
-import static org.junit.Assert.assertTrue
 import static org.junit.runners.MethodSorters.NAME_ASCENDING
 
 /**

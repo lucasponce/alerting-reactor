@@ -17,9 +17,6 @@
 package org.hawkular.alerts.rest
 
 import org.hawkular.alerts.api.json.GroupConditionsInfo
-import org.hawkular.alerts.api.json.GroupMemberInfo
-import org.hawkular.alerts.api.json.UnorphanMemberInfo
-import org.hawkular.alerts.api.model.dampening.Dampening
 
 import static org.hawkular.alerts.api.model.condition.AvailabilityCondition.Operator
 import static org.hawkular.alerts.api.model.condition.NelsonCondition.NelsonRule

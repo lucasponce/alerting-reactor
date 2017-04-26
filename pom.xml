@@ -79,12 +79,15 @@
     <version.io.projectreactor>3.0.6.RELEASE</version.io.projectreactor>
     <version.io.projectreactor.ipc>0.6.2.RELEASE</version.io.projectreactor.ipc>
     <version.io.swagger>1.5.8</version.io.swagger>
+    <version.log4j>1.2.17</version.log4j>
     <version.maven-patch-plugin>1.2</version.maven-patch-plugin>
     <version.org.antlr>4.6</version.org.antlr>
     <version.org.apache.commons.commons-math3>3.4.1</version.org.apache.commons.commons-math3>
     <version.org.apache.logging.log4j-elasticsearch>2.8</version.org.apache.logging.log4j-elasticsearch>
     <version.org.apache.logging.log4j>2.8.1</version.org.apache.logging.log4j>
     <version.org.cassalog>0.4.2</version.org.cassalog>
+    <version.org.codehaus.groovy>2.4.10</version.org.codehaus.groovy>
+    <version.org.codehaus.groovy.modules.http-builder>0.7.1</version.org.codehaus.groovy.modules.http-builder>
     <version.org.codehaus.jsr166-mirror>1.7.0</version.org.codehaus.jsr166-mirror>
     <version.org.codehaus.gpars>1.2.0</version.org.codehaus.gpars>
     <version.org.codehaus.groovy.maven>1.0</version.org.codehaus.groovy.maven>
@@ -117,9 +120,8 @@
         <module>hawkular-alerts-filter-api</module>
         <module>hawkular-alerts-engine</module>
         <module>hawkular-alerts-netty</module>
+        <module>hawkular-alerts-integration-tests</module>
         <!--module>hawkular-alerts-engine-extensions</module-->
-        <!--module>hawkular-alerts-rest-api</module-->
-        <!-- module>hawkular-alerts-rest-tests</module-->
         <!--module>hawkular-alerters</module-->
       </modules>
     </profile>

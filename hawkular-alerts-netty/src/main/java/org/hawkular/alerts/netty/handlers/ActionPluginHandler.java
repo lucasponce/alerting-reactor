@@ -6,8 +6,10 @@ import static io.netty.handler.codec.http.HttpResponseStatus.INTERNAL_SERVER_ERR
 import static io.netty.handler.codec.http.HttpResponseStatus.NOT_FOUND;
 import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static org.hawkular.alerts.api.json.JsonUtil.toJson;
+import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
 import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
+import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 import static org.hawkular.alerts.netty.util.ResponseUtil.notFound;
 import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
 import static reactor.core.publisher.Mono.just;
@@ -52,6 +54,10 @@ public class ActionPluginHandler implements RestHandler {
                                    String subpath,
                                    Map<String, List<String>> params) {
         HttpMethod method = req.method();
+        if (isEmpty(tenantId)) {
+            return badRequest(resp, TENANT_HEADER_NAME + " header is required");
+        }
+
         // GET /
         if (method == GET && subpath.equals(ROOT)) {
             return findActionPlugins(resp);
