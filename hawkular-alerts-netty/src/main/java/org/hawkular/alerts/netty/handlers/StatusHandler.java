@@ -16,6 +16,8 @@ import org.hawkular.alerts.netty.RestHandler;
 import org.hawkular.alerts.netty.util.ManifestUtil;
 import org.reactivestreams.Publisher;
 
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -44,18 +46,24 @@ public class StatusHandler implements RestHandler {
                                    String tenantId,
                                    String subpath,
                                    Map<String, List<String>> params) {
-        Map<String, String> status = new HashMap<>();
-        status.putAll(manifestUtil.getFrom());
-        if (statusService.isStarted()) {
-            status.put(STATUS, STARTED);
-        } else {
-            status.put(STATUS, FAILED);
-        }
-        boolean distributed = statusService.isDistributed();
-        status.put(DISTRIBUTED, Boolean.toString(distributed));
-        if (distributed) {
-            status.putAll(statusService.getDistributedStatus());
-        }
-        return ok(resp, status);
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    Map<String, String> status = new HashMap<>();
+                    status.putAll(manifestUtil.getFrom());
+                    if (statusService.isStarted()) {
+                        status.put(STATUS, STARTED);
+                    } else {
+                        status.put(STATUS, FAILED);
+                    }
+                    boolean distributed = statusService.isDistributed();
+                    status.put(DISTRIBUTED, Boolean.toString(distributed));
+                    if (distributed) {
+                        status.putAll(statusService.getDistributedStatus());
+                    }
+                    return status;
+                }))
+                .flatMap(status -> ok(resp, status));
     }
 }

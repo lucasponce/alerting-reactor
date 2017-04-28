@@ -8,6 +8,7 @@ import static io.netty.handler.codec.http.HttpResponseStatus.OK;
 import static org.hawkular.alerts.api.json.JsonUtil.toJson;
 import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
+import static org.hawkular.alerts.netty.util.ResponseUtil.handleExceptions;
 import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
 import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 import static org.hawkular.alerts.netty.util.ResponseUtil.notFound;
@@ -24,11 +25,15 @@ import org.hawkular.alerts.engine.StandaloneAlerts;
 import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.netty.RestEndpoint;
 import org.hawkular.alerts.netty.RestHandler;
+import org.hawkular.alerts.netty.util.ResponseUtil;
 import org.hawkular.alerts.netty.util.ResponseUtil.ApiError;
+import org.hawkular.alerts.netty.util.ResponseUtil.InternalServerException;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
 
 import io.netty.handler.codec.http.HttpMethod;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -60,38 +65,53 @@ public class ActionPluginHandler implements RestHandler {
 
         // GET /
         if (method == GET && subpath.equals(ROOT)) {
-            return findActionPlugins(resp);
+            return findActionPlugins(req, resp);
         }
         // GET /{actionPlugin}
         if (method == GET && subpath.indexOf('/', 1) == -1) {
             String actionPlugin = subpath.substring(1);
-            return getActionPlugin(resp, actionPlugin);
+            return getActionPlugin(req, resp, actionPlugin);
         }
         return badRequest(resp, "Wrong path " + method + " " + subpath);
     }
 
-    Publisher<Void> findActionPlugins(HttpServerResponse resp) {
-        try {
-            Collection<String> actionPlugins = definitionsService.getActionPlugins();
-            log.debugf("ActionPlugins: %s", actionPlugins);
-            return ok(resp, actionPlugins);
-        } catch (Exception e) {
-            log.errorf(e, "Error querying all plugins. Reason: %s", e.toString());
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> findActionPlugins(HttpServerRequest req, HttpServerResponse resp) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Collection<String> actionPlugins = definitionsService.getActionPlugins();
+                        log.debugf("ActionPlugins: %s", actionPlugins);
+                        return actionPlugins;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error querying all plugins. Reason: %s", e.toString());
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(actionPlugins -> ok(resp, actionPlugins))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> getActionPlugin(HttpServerResponse resp, String actionPlugin) {
-        try {
-            Set<String> actionPluginProps = definitionsService.getActionPlugin(actionPlugin);
-            log.debugf("ActionPlugin: %s - Properties: %s", actionPlugin, actionPluginProps);
-            if (actionPluginProps == null) {
-                return notFound(resp, "Not found action plugin: " + actionPlugin);
-            }
-            return ok(resp, actionPluginProps);
-        } catch (Exception e) {
-            log.errorf(e, "Error querying plugin %s. Reason: %s", actionPlugin, e.toString());
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> getActionPlugin(HttpServerRequest req, HttpServerResponse resp, String actionPlugin) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    Set<String> actionPluginProps;
+                    try {
+                        actionPluginProps = definitionsService.getActionPlugin(actionPlugin);
+                        log.debugf("ActionPlugin: %s - Properties: %s", actionPlugin, actionPluginProps);
+                    } catch (Exception e) {
+                        log.errorf(e, "Error querying plugin %s. Reason: %s", actionPlugin, e.toString());
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (actionPluginProps == null) {
+                        throw new ResponseUtil.NotFoundException("Not found action plugin: " + actionPlugin);
+                    }
+                    return actionPluginProps;
+                }))
+                .flatMap(actionPluginProps -> ok(resp, actionPluginProps))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 }

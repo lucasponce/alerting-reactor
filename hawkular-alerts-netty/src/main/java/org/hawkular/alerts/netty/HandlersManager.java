@@ -47,7 +47,7 @@ public class HandlersManager {
         QueryStringDecoder query = new QueryStringDecoder(req.uri());
         String path = query.path();
         Map<String, List<String>> params = query.parameters();
-        log.infof("route: %s %s\n", path, params);
+        log.debugf("%s %s %s", req.method().name(), path, params);
         if (path.length() >= baseUrl.length()) {
             String base = query.path().substring(0, baseUrl.length());
             if (baseUrl.equals(base)) {

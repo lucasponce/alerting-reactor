@@ -4,6 +4,7 @@ import static io.netty.handler.codec.http.HttpMethod.POST;
 import static org.hawkular.alerts.api.json.JsonUtil.fromJson;
 import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
+import static org.hawkular.alerts.netty.util.ResponseUtil.handleExceptions;
 import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
 import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
@@ -18,10 +19,14 @@ import org.hawkular.alerts.engine.StandaloneAlerts;
 import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.netty.RestEndpoint;
 import org.hawkular.alerts.netty.RestHandler;
+import org.hawkular.alerts.netty.util.ResponseUtil;
+import org.hawkular.alerts.netty.util.ResponseUtil.BadRequestException;
+import org.hawkular.alerts.netty.util.ResponseUtil.InternalServerException;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
 
 import io.netty.handler.codec.http.HttpMethod;
+import reactor.core.scheduler.Schedulers;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -53,33 +58,39 @@ public class ImportHandler implements RestHandler {
         // POST /{strategy}
         String[] tokens = subpath.substring(1).split(ROOT);
         if (method == POST && tokens.length == 1) {
-            Definitions definitions;
-            String json = req
-                    .receive()
-                    .aggregate()
-                    .asString()
-                    .block();
-            try {
-                definitions = fromJson(json, Definitions.class);
-            } catch (Exception e) {
-                log.errorf(e, "Error parsing Definitions json: %s. Reason: %s", json, e.toString());
-                return badRequest(resp, e.toString());
-            }
-            return importDefinitions(resp, tenantId, tokens[0], definitions);
+            return importDefinitions(req, resp, tenantId, tokens[0]);
         }
         return badRequest(resp, "Wrong path " + method + " " + subpath);
     }
 
-    Publisher<Void> importDefinitions(HttpServerResponse resp, String tenantId, String strategy, Definitions definitions) {
-        try {
-            ImportType importType = ImportType.valueOf(strategy.toUpperCase());
-            Definitions imported = definitionsService.importDefinitions(tenantId, definitions, importType);
-            return ok(resp, imported);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp, e.toString());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> importDefinitions(HttpServerRequest req, HttpServerResponse resp, String tenantId, String strategy) {
+        return req
+                .receive()
+                .aggregate()
+                .asString()
+                .publishOn(Schedulers.elastic())
+                .map(json -> {
+                    Definitions parsed;
+                    try {
+                        parsed = fromJson(json, Definitions.class);
+                        return parsed;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error parsing Definitions json: %s. Reason: %s", json, e.toString());
+                        throw new ResponseUtil.NotFoundException(e.toString());
+                    }
+                })
+                .flatMap(definitions -> {
+                    try {
+                        ImportType importType = ImportType.valueOf(strategy.toUpperCase());
+                        Definitions imported = definitionsService.importDefinitions(tenantId, definitions, importType);
+                        return ok(resp, imported);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException(e.toString());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 }

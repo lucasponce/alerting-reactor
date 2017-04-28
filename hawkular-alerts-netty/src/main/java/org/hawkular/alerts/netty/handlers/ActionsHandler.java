@@ -8,11 +8,13 @@ import static org.hawkular.alerts.api.json.JsonUtil.fromJson;
 import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
 import static org.hawkular.alerts.netty.util.ResponseUtil.extractPaging;
+import static org.hawkular.alerts.netty.util.ResponseUtil.handleExceptions;
 import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
 import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 import static org.hawkular.alerts.netty.util.ResponseUtil.notFound;
 import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
 import static org.hawkular.alerts.netty.util.ResponseUtil.paginatedOk;
+import static org.hawkular.alerts.netty.util.ResponseUtil.replaceQueryParam;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -32,10 +34,15 @@ import org.hawkular.alerts.engine.StandaloneAlerts;
 import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.netty.RestEndpoint;
 import org.hawkular.alerts.netty.RestHandler;
+import org.hawkular.alerts.netty.util.ResponseUtil;
+import org.hawkular.alerts.netty.util.ResponseUtil.BadRequestException;
+import org.hawkular.alerts.netty.util.ResponseUtil.InternalServerException;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
 
 import io.netty.handler.codec.http.HttpMethod;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -78,41 +85,15 @@ public class ActionsHandler implements RestHandler {
         }
         // GET /
         if (method == GET && subpath.equals(ROOT)) {
-            return findActionIds(resp, tenantId);
+            return findActionIds(req, resp, tenantId);
         }
         // POST /
+        if (method == POST && subpath.equals(ROOT)) {
+            return createActionDefinition(req, resp, tenantId);
+        }
         // PUT /
-        if ((method == POST || method == PUT) && subpath.equals(ROOT)) {
-            String json = req
-                    .receive()
-                    .aggregate()
-                    .asString()
-                    .block();
-            ActionDefinition actionDefinition;
-            try {
-                actionDefinition = fromJson(json, ActionDefinition.class);
-            } catch (Exception e) {
-                log.errorf(e, "Error parsing ActionDefinition json: %s. Reason: %s", json, e.toString());
-                return badRequest(resp, e.toString());
-            }
-            if (actionDefinition == null) {
-                return badRequest(resp, "actionDefinition must be not null");
-            }
-            if (isEmpty(actionDefinition.getActionPlugin())) {
-                return badRequest(resp, "actionPlugin must be not null");
-            }
-            if (isEmpty(actionDefinition.getActionId())) {
-                return badRequest(resp, "actionId must be not null");
-            }
-            if (isEmpty(actionDefinition.getProperties())) {
-                return badRequest(resp, "properties must be not null");
-            }
-            actionDefinition.setTenantId(tenantId);
-            if (method == POST) {
-                return createActionDefinition(resp, actionDefinition);
-            } else {
-                return updateActionDefinition(resp, actionDefinition);
-            }
+        if (method == PUT && subpath.equals(ROOT)) {
+            return updateActionDefinition(req, resp, tenantId);
         }
         // GET /history
         if (method == GET && subpath.equals(HISTORY)) {
@@ -120,144 +101,272 @@ public class ActionsHandler implements RestHandler {
         }
         // PUT /history/delete
         if (method == PUT && subpath.equals(HISTORY_DELETE)) {
-            return deleteActionsHistory(resp, tenantId, params);
+            return deleteActionsHistory(req, resp, tenantId, params);
         }
         String[] tokens = subpath.substring(1).split(ROOT);
         // GET /plugin/{actionPlugin}
         if (method == GET && subpath.startsWith(PLUGIN) && tokens.length == 2) {
-            return findActionIdsByPlugin(resp, tenantId, tokens[1]);
+            return findActionIdsByPlugin(req, resp, tenantId, tokens[1]);
         }
         // GET /{actionPlugin}/{actionId}
         if (method == GET && tokens.length == 2) {
-            return getActionDefinition(resp, tenantId, tokens[0], tokens[1]);
+            return getActionDefinition(req, resp, tenantId, tokens[0], tokens[1]);
         }
         // DELETE /{actionPlugin}/{actionId}
         if (method == DELETE && tokens.length == 2) {
-            return deleteActionDefinition(resp, tenantId, tokens[0], tokens[1]);
+            return deleteActionDefinition(req, resp, tenantId, tokens[0], tokens[1]);
         }
         return badRequest(resp, "Wrong path " + method + " " + subpath);
     }
 
-    Publisher<Void> findActionIds(HttpServerResponse resp, String tenantId) {
-        try {
-            Map<String, Set<String>> actions = definitionsService.getActionDefinitionIds(tenantId);
-            log.debugf("Actions: %s", actions);
-            return ok(resp, actions);
-        } catch (Exception e) {
-            log.errorf(e, "Error querying actions ids for tenantId %s. Reason: %s", tenantId, e.toString());
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> findActionIds(HttpServerRequest req, HttpServerResponse resp, String tenantId) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Map<String, Set<String>> actions = definitionsService.getActionDefinitionIds(tenantId);
+                        log.debugf("Actions: %s", actions);
+                        return actions;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error querying actions ids for tenantId %s. Reason: %s", tenantId, e.toString());
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(actions -> ok(resp, actions))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> findActionIdsByPlugin(HttpServerResponse resp, String tenantId, String actionPlugin) {
-        try {
-            Collection<String> actions = definitionsService.getActionDefinitionIds(tenantId, actionPlugin);
-            log.debugf("Actions: %s", actions);
-            return ok(resp, actions);
-        } catch (Exception e) {
-            log.errorf(e, "Error querying actions ids for tenantId %s and actionPlugin %s. Reason: %s", tenantId, actionPlugin, e.toString());
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> findActionIdsByPlugin(HttpServerRequest req, HttpServerResponse resp, String tenantId, String actionPlugin) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Collection<String> actions = definitionsService.getActionDefinitionIds(tenantId, actionPlugin);
+                        log.debugf("Actions: %s", actions);
+                        return actions;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error querying actions ids for tenantId %s and actionPlugin %s. Reason: %s", tenantId, actionPlugin, e.toString());
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(actions -> ok(resp, actions))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> getActionDefinition(HttpServerResponse resp, String tenantId, String actionPlugin, String actionId) {
-        try {
-            ActionDefinition actionDefinition = definitionsService.getActionDefinition(tenantId, actionPlugin, actionId);
-            log.debugf("ActionDefinition: %s", actionDefinition);
-            if (actionDefinition == null) {
-                return notFound(resp, "Not action found for actionPlugin: " + actionPlugin + " and actionId: " + actionId);
-            }
-            return ok(resp, actionDefinition);
-        } catch (Exception e) {
-            log.errorf("Error querying action definition for tenantId %s actionPlugin %s and actionId %s", tenantId, actionPlugin, actionId);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> getActionDefinition(HttpServerRequest req, HttpServerResponse resp, String tenantId, String actionPlugin, String actionId) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    ActionDefinition actionDefinition;
+                    try {
+                        actionDefinition = definitionsService.getActionDefinition(tenantId, actionPlugin, actionId);
+                        log.debugf("ActionDefinition: %s", actionDefinition);
+                    } catch (Exception e) {
+                        log.errorf("Error querying action definition for tenantId %s actionPlugin %s and actionId %s", tenantId, actionPlugin, actionId);
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (actionDefinition == null) {
+                        throw new ResponseUtil.NotFoundException("Not action found for actionPlugin: " + actionPlugin + " and actionId: " + actionId);
+                    }
+                    return actionDefinition;
+                }))
+                .flatMap(actionDefinition -> ok(resp, actionDefinition))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> createActionDefinition(HttpServerResponse resp, ActionDefinition actionDefinition) {
-        try {
-            if (definitionsService.getActionDefinition(actionDefinition.getTenantId(),
-                    actionDefinition.getActionPlugin(), actionDefinition.getActionId()) != null) {
-                return badRequest(resp, "Existing ActionDefinition: " + actionDefinition);
-            } else {
-                definitionsService.addActionDefinition(actionDefinition.getTenantId(), actionDefinition);
-                log.debugf("ActionDefinition: %s", actionDefinition);
-                return ok(resp, actionDefinition);
-            }
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> createActionDefinition(HttpServerRequest req, HttpServerResponse resp, String tenantId) {
+        return req
+                .receive()
+                .aggregate()
+                .asString()
+                .publishOn(Schedulers.elastic())
+                .map(json -> {
+                    ActionDefinition parsed;
+                    try {
+                        parsed = fromJson(json, ActionDefinition.class);
+                        return parsed;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error parsing ActionDefinition json: %s. Reason: %s", json, e.toString());
+                        throw new BadRequestException(e.toString());
+                    }
+                })
+                .flatMap(actionDefinition -> {
+                    if (actionDefinition == null) {
+                        throw new BadRequestException("actionDefinition must be not null");
+                    }
+                    if (isEmpty(actionDefinition.getActionPlugin())) {
+                        throw new BadRequestException("actionPlugin must be not null");
+                    }
+                    if (isEmpty(actionDefinition.getActionId())) {
+                        throw new BadRequestException("actionId must be not null");
+                    }
+                    if (isEmpty(actionDefinition.getProperties())) {
+                        throw new BadRequestException("properties must be not null");
+                    }
+                    actionDefinition.setTenantId(tenantId);
+                    ActionDefinition found;
+                    try {
+                        found = definitionsService.getActionDefinition(actionDefinition.getTenantId(),
+                                actionDefinition.getActionPlugin(), actionDefinition.getActionId());
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (found != null) {
+                        throw new BadRequestException("Existing ActionDefinition: " + actionDefinition);
+                    }
+                    try {
+                        definitionsService.addActionDefinition(actionDefinition.getTenantId(), actionDefinition);
+                        log.debugf("ActionDefinition: %s", actionDefinition);
+                        return ok(resp, actionDefinition);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> updateActionDefinition(HttpServerResponse resp, ActionDefinition actionDefinition) {
-        try {
-            if (definitionsService.getActionDefinition(actionDefinition.getTenantId(),
-                    actionDefinition.getActionPlugin(), actionDefinition.getActionId()) != null) {
-                definitionsService.updateActionDefinition(actionDefinition.getTenantId(), actionDefinition);
-                log.debugf("ActionDefinition: %s", actionDefinition);
-                return ok(resp, actionDefinition);
-            } else {
-                return notFound(resp, "ActionDefinition: " + actionDefinition + " not found for update");
-            }
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> updateActionDefinition(HttpServerRequest req, HttpServerResponse resp, String tenantId) {
+        return req
+                .receive()
+                .aggregate()
+                .asString()
+                .publishOn(Schedulers.elastic())
+                .map(json -> {
+                    ActionDefinition parsed;
+                    try {
+                        parsed = fromJson(json, ActionDefinition.class);
+                        return parsed;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error parsing ActionDefinition json: %s. Reason: %s", json, e.toString());
+                        throw new BadRequestException(e.toString());
+                    }
+                })
+                .flatMap(actionDefinition -> {
+                    if (actionDefinition == null) {
+                        throw new BadRequestException("actionDefinition must be not null");
+                    }
+                    if (isEmpty(actionDefinition.getActionPlugin())) {
+                        throw new BadRequestException("actionPlugin must be not null");
+                    }
+                    if (isEmpty(actionDefinition.getActionId())) {
+                        throw new BadRequestException("actionId must be not null");
+                    }
+                    if (isEmpty(actionDefinition.getProperties())) {
+                        throw new BadRequestException("properties must be not null");
+                    }
+                    actionDefinition.setTenantId(tenantId);
+                    ActionDefinition found;
+                    try {
+                        found = definitionsService.getActionDefinition(actionDefinition.getTenantId(),
+                                actionDefinition.getActionPlugin(), actionDefinition.getActionId());
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (found == null) {
+                        throw new ResponseUtil.NotFoundException("ActionDefinition: " + actionDefinition + " not found for update");
+                    }
+                    try {
+                        definitionsService.updateActionDefinition(actionDefinition.getTenantId(), actionDefinition);
+                        log.debugf("ActionDefinition: %s", actionDefinition);
+                        return ok(resp, actionDefinition);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> deleteActionDefinition(HttpServerResponse resp, String tenantId, String actionPlugin, String actionId) {
-        try {
-            if (definitionsService.getActionDefinition(tenantId, actionPlugin, actionId) != null) {
-                definitionsService.removeActionDefinition(tenantId, actionPlugin, actionId);
-                log.debugf("ActionPlugin: %s ActionId: %s", actionPlugin, actionId);
-                return ok(resp);
-            } else {
-                return notFound(resp, "ActionPlugin: " + actionPlugin + " ActionId: " + actionId +
-                        " not found for delete");
-            }
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> deleteActionDefinition(HttpServerRequest req, HttpServerResponse resp, String tenantId, String actionPlugin, String actionId) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    ActionDefinition found;
+                    try {
+                        found = definitionsService.getActionDefinition(tenantId, actionPlugin, actionId);
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (found == null) {
+                        throw new ResponseUtil.NotFoundException("ActionPlugin: " + actionPlugin + " ActionId: " + actionId + " not found for delete");
+                    }
+                    try {
+                        definitionsService.removeActionDefinition(tenantId, actionPlugin, actionId);
+                        log.debugf("ActionPlugin: %s ActionId: %s", actionPlugin, actionId);
+                        return found;
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(found -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     Publisher<Void> findActionsHistory(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params, String uri) {
-        try {
-            Pager pager = extractPaging(params);
-            ActionsCriteria criteria = buildCriteria(params);
-            Page<Action> actionPage = actionsService.getActions(tenantId, criteria, pager);
-            log.debugf("Actions: %s", actionPage);
-            if (isEmpty(actionPage)) {
-                return ok(resp, actionPage);
-            }
-            return paginatedOk(req, resp, actionPage, uri);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Pager pager = extractPaging(params);
+                        ActionsCriteria criteria = buildCriteria(params);
+                        Page<Action> actionPage = actionsService.getActions(tenantId, criteria, pager);
+                        log.debugf("Actions: %s", actionPage);
+                        return actionPage;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(actionPage -> {
+                    if (isEmpty(actionPage)) {
+                        return ok(resp, actionPage);
+                    }
+                    return paginatedOk(req, resp, actionPage, uri);
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> deleteActionsHistory(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        try {
-            ActionsCriteria criteria = buildCriteria(params);
-            int numDeleted = actionsService.deleteActions(tenantId, criteria);
-            log.debugf("Actions deleted: %s", numDeleted);
-            Map<String, String> deleted = new HashMap<>();
-            deleted.put("deleted", String.valueOf(numDeleted));
-            return ok(resp, deleted);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> deleteActionsHistory(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        ActionsCriteria criteria = buildCriteria(params);
+                        int numDeleted = actionsService.deleteActions(tenantId, criteria);
+                        log.debugf("Actions deleted: %s", numDeleted);
+                        Map<String, String> deleted = new HashMap<>();
+                        deleted.put("deleted", String.valueOf(numDeleted));
+                        return deleted;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(deleted -> ok(resp, deleted))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     ActionsCriteria buildCriteria(Map<String, List<String>> params) {

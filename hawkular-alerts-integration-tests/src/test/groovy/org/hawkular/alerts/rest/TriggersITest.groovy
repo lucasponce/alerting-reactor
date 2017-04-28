@@ -45,23 +45,6 @@ class TriggersITest extends AbstractITestBase {
     static Logger logger = LoggerFactory.getLogger(TriggersITest.class)
 
     @Test
-    void testFailingEndPoint() {
-        def client = new RESTClient(baseURI, ContentType.JSON)
-        client.handler.failure = { it }
-        client.headers.put("Hawkular-Tenant", testTenant)
-
-        def resp = client.delete(path: "triggers/failing-test")
-        assert(200 == resp.status || 404 == resp.status)
-
-        Trigger testTrigger = new Trigger("failing-test", "No-Metric");
-        resp = client.post(path: "triggers", body: testTrigger)
-        assert(200 == resp.status || 404 == resp.status)
-
-        resp = client.post(path: "triggers", body: testTrigger)
-        assertEquals(200, resp.status)
-    }
-
-    @Test
     void createTrigger() {
         Trigger testTrigger = new Trigger("test-trigger-1", "No-Metric");
 
@@ -381,7 +364,7 @@ class TriggersITest extends AbstractITestBase {
 
         // ensure a group trigger can not be removed with the standard remove trigger
         resp = client.delete(path: "triggers/group-trigger")
-        assertEquals(500, resp.status)
+        assertEquals(400, resp.status) // Changed here as it should return a 400 due is a bad argument, not an internal problem
 
         // remove group trigger
         resp = client.delete(path: "triggers/groups/group-trigger")

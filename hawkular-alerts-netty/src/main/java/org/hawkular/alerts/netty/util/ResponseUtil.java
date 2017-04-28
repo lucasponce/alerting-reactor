@@ -100,7 +100,7 @@ public class ResponseUtil {
                 .addHeader(ACCEPT, APPLICATION_JSON)
                 .addHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .status(OK)
-                .headers(createPagingHeaders(req.requestHeaders(), page, uri))
+                .headers(createPagingHeaders(resp.responseHeaders(), page, uri))
                 .sendString(just(toJson(page)));
     }
 
@@ -299,6 +299,61 @@ public class ResponseUtil {
 
             default:
                 throw new Exception("Unhandled Dampening Type: " + dampening.toString());
+        }
+    }
+
+    public static Publisher<Void> handleExceptions(HttpServerResponse resp, Throwable e) {
+        if (e instanceof BadRequestException) {
+            return badRequest(resp, e.toString());
+        }
+        if (e instanceof NotFoundException) {
+            return notFound(resp, e.getMessage());
+        }
+        return internalServerError(resp, e.toString());
+    }
+
+    public static class BadRequestException extends RuntimeException {
+
+        public BadRequestException(String message) {
+            super(message);
+        }
+
+        public BadRequestException(Throwable cause) {
+            super(cause);
+        }
+
+        public BadRequestException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    public static class InternalServerException extends RuntimeException {
+
+        public InternalServerException(String message) {
+            super(message);
+        }
+
+        public InternalServerException(Throwable cause) {
+            super(cause);
+        }
+
+        public InternalServerException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    public static class NotFoundException extends RuntimeException {
+
+        public NotFoundException(String message) {
+            super(message);
+        }
+
+        public NotFoundException(Throwable cause) {
+            super(cause);
+        }
+
+        public NotFoundException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }

@@ -34,16 +34,16 @@ public class AlertingServer implements AlertingServerMBean {
         Integer port = Integer.valueOf(AlertProperties.getProperty(PORT, PORT_DEFAULT));
 
         log.infof("Starting Server at http://%s:%s", bindAdress, port);
-
-        StandaloneAlerts.start();
-        handlers = new HandlersManager();
-        handlers.start();
-        StandaloneActionPluginRegister.start();
         try {
+            StandaloneAlerts.start();
+            handlers = new HandlersManager();
+            handlers.start();
+            StandaloneActionPluginRegister.start();
             context = HttpServer.create(bindAdress, port)
                     .newRouter(r -> r
                             .route(req -> true, (req, resp) -> handlers.process(req, resp)))
                     .block();
+            context.onClose().block();
         } catch (Exception e) {
             log.fatal(e);
             log.fatal("Forcing exit");
@@ -51,7 +51,7 @@ public class AlertingServer implements AlertingServerMBean {
             StandaloneAlerts.stop();
             System.exit(1);
         }
-        context.onClose().block();
+
     }
 
     public String getStatus() {

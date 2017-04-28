@@ -10,6 +10,7 @@ import static org.hawkular.alerts.api.json.JsonUtil.toJson;
 import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
 import static org.hawkular.alerts.netty.util.ResponseUtil.extractPaging;
+import static org.hawkular.alerts.netty.util.ResponseUtil.handleExceptions;
 import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
 import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 import static org.hawkular.alerts.netty.util.ResponseUtil.notFound;
@@ -36,12 +37,17 @@ import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.netty.RestEndpoint;
 import org.hawkular.alerts.netty.RestHandler;
 import org.hawkular.alerts.netty.handlers.AlertsWatcher.AlertsListener;
+import org.hawkular.alerts.netty.util.ResponseUtil;
+import org.hawkular.alerts.netty.util.ResponseUtil.BadRequestException;
+import org.hawkular.alerts.netty.util.ResponseUtil.InternalServerException;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
 
 import io.netty.handler.codec.http.HttpMethod;
 import reactor.core.publisher.Flux;
 
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -111,85 +117,79 @@ public class AlertsHandler implements RestHandler {
         }
         // PUT /tags
         if (method == PUT && subpath.equals(TAGS)) {
-            return addTags(resp, tenantId, params);
+            return addTags(req, resp, tenantId, params);
         }
         // DELETE /tags
         if (method == DELETE && subpath.equals(TAGS)) {
-            return removeTags(resp, tenantId, params);
+            return removeTags(req, resp, tenantId, params);
         }
         // PUT /ack
         if (method == PUT && subpath.equals(ACK)) {
-            return ackAlerts(resp, tenantId, params);
+            return ackAlerts(req, resp, tenantId, params);
         }
         // PUT /delete
         if (method == DELETE && subpath.equals(_DELETE)) {
-            return deleteAlerts(resp, tenantId, params);
+            return deleteAlerts(req, resp, tenantId, null, params);
         }
         // PUT /resolve
         if (method == PUT && subpath.equals(RESOLVE)) {
-            return resolveAlerts(resp, tenantId, params);
+            return resolveAlerts(req, resp, tenantId, null, params);
         }
         // POST /data
         if (method == POST && subpath.equals(DATA)) {
-            String json = req
-                    .receive()
-                    .aggregate()
-                    .asString()
-                    .block();
-            Collection<Data> datums;
-            try {
-                datums = collectionFromJson(json, Data.class);
-            } catch (Exception e) {
-                log.errorf(e, "Error parsing Datums json: %s. Reason: %s", json, e.toString());
-                return badRequest(resp, e.toString());
-            }
-            if (isEmpty(datums)) {
-                return badRequest(resp, "Data is empty");
-            }
-            return sendData(resp, tenantId, datums);
+            return sendData(req, resp, tenantId);
         }
 
         String[] tokens = subpath.substring(1).split(ROOT);
         // DELETE /{alertId}
         if (method == DELETE && tokens.length == 1) {
-            return deleteAlert(resp, tenantId, tokens[0]);
+            return deleteAlerts(req, resp, tenantId, tokens[0], params);
         }
         // PUT /ack/{alertId}
         if (method == PUT && subpath.startsWith(ACK) && tokens.length == 2) {
-            return ackAlert(resp, tenantId, tokens[1], params);
+            return ackAlert(req, resp, tenantId, tokens[1], params);
         }
         // PUT /note/{alertId}
         if (method == PUT && subpath.startsWith(NOTE) && tokens.length == 2) {
-            return addAlertNote(resp, tenantId, tokens[1], params);
+            return addAlertNote(req, resp, tenantId, tokens[1], params);
         }
         // GET /alert/{alertId}
         if (method == GET && subpath.startsWith(ALERT) && tokens.length == 2) {
-            return getAlert(resp, tenantId, tokens[1], params);
+            return getAlert(req, resp, tenantId, tokens[1], params);
         }
         // PUT /resolve/{alertId}
         if (method == PUT && subpath.startsWith(RESOLVE) && tokens.length == 2) {
-            return resolveAlert(resp, tenantId, tokens[1], params);
+            return resolveAlerts(req, resp, tenantId, tokens[1], params);
         }
 
         return badRequest(resp, "Wrong path " + method + " " + subpath);
     }
 
     Publisher<Void> findAlerts(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params, String uri) {
-        try {
-            Pager pager = extractPaging(params);
-            AlertsCriteria criteria = buildCriteria(params);
-            Page<Alert> alertPage = alertsService.getAlerts(tenantId, criteria, pager);
-            log.debugf("Alerts: %s", alertPage);
-            if (isEmpty(alertPage)) {
-                return ok(resp, alertPage);
-            }
-            return paginatedOk(req, resp, alertPage, uri);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Pager pager = extractPaging(params);
+                        AlertsCriteria criteria = buildCriteria(params);
+                        Page<Alert> alertPage = alertsService.getAlerts(tenantId, criteria, pager);
+                        log.debugf("Alerts: %s", alertPage);
+                        return alertPage;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(alertPage -> {
+                    if (isEmpty(alertPage)) {
+                        return ok(resp, alertPage);
+                    }
+                    return paginatedOk(req, resp, alertPage, uri);
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     Publisher<Void> watchAlerts(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
@@ -212,249 +212,291 @@ public class AlertsHandler implements RestHandler {
         return watcherFlux.window(1).concatMap(w -> resp.sendString(w));
     }
 
-    Publisher<Void> ackAlert(HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
-        String ackBy = null;
-        String ackNotes = null;
-        if (isEmpty(alertId)) {
-            return badRequest(resp, "AlertId required for ack");
-        }
-        if (params.get(PARAM_ACK_BY) != null) {
-            ackBy = params.get(PARAM_ACK_BY).get(0);
-        }
-        if (params.get(PARAM_ACK_NOTES) != null) {
-            ackNotes = params.get(PARAM_ACK_NOTES).get(0);
-        }
-        try {
-            alertsService.ackAlerts(tenantId, Arrays.asList(alertId), ackBy, ackNotes);
-            log.debugf("Ack AlertId: ", alertId);
-            return ok(resp);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> ackAlert(HttpServerRequest req, HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String ackBy = null;
+                    String ackNotes = null;
+                    if (isEmpty(alertId)) {
+                        return badRequest(resp, "AlertId required for ack");
+                    }
+                    if (params.get(PARAM_ACK_BY) != null) {
+                        ackBy = params.get(PARAM_ACK_BY).get(0);
+                    }
+                    if (params.get(PARAM_ACK_NOTES) != null) {
+                        ackNotes = params.get(PARAM_ACK_NOTES).get(0);
+                    }
+                    try {
+                        alertsService.ackAlerts(tenantId, Arrays.asList(alertId), ackBy, ackNotes);
+                        log.debugf("Ack AlertId: ", alertId);
+                        return ackBy;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(ackBy -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> addAlertNote(HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
-        String user = null;
-        String text = null;
-        if (isEmpty(alertId)) {
-            return badRequest(resp, "AlertId required for adding notes");
-        }
-        if (params.get(PARAM_USER) != null) {
-            user = params.get(PARAM_USER).get(0);
-        }
-        if (params.get(PARAM_TEXT) != null) {
-            text = params.get(PARAM_TEXT).get(0);
-        }
-        try {
-            alertsService.addNote(tenantId, alertId, user, text);
-            log.debugf("Noted AlertId: ", alertId);
-            return ok(resp);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> addAlertNote(HttpServerRequest req, HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String user = null;
+                    String text = null;
+                    if (isEmpty(alertId)) {
+                        throw new BadRequestException("AlertId required for adding notes");
+                    }
+                    if (params.get(PARAM_USER) != null) {
+                        user = params.get(PARAM_USER).get(0);
+                    }
+                    if (params.get(PARAM_TEXT) != null) {
+                        text = params.get(PARAM_TEXT).get(0);
+                    }
+                    try {
+                        alertsService.addNote(tenantId, alertId, user, text);
+                        log.debugf("Noted AlertId: ", alertId);
+                        return user;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(user -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> addTags(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        String alertIds = null;
-        String tags = null;
-        if (params.get(PARAM_ALERT_IDS) != null) {
-            alertIds = params.get(PARAM_ALERT_IDS).get(0);
-        }
-        if (params.get(PARAM_TAGS) != null) {
-            tags = params.get(PARAM_TAGS).get(0);
-        }
-        try {
-            if (!isEmpty(alertIds) && !isEmpty(tags)) {
-                List<String> alertIdList = Arrays.asList(alertIds.split(","));
-                Map<String, String> tagsMap = parseTags(tags);
-                alertsService.addAlertTags(tenantId, alertIdList, tagsMap);
-                log.debugf("Tagged alertIds:%s, %s", alertIdList, tagsMap);
-                return ok(resp);
-            }
-            return badRequest(resp, "AlertIds and Tags required for adding tags");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-                return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> addTags(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String alertIds = null;
+                    String tags = null;
+                    if (params.get(PARAM_ALERT_IDS) != null) {
+                        alertIds = params.get(PARAM_ALERT_IDS).get(0);
+                    }
+                    if (params.get(PARAM_TAGS) != null) {
+                        tags = params.get(PARAM_TAGS).get(0);
+                    }
+                    if (isEmpty(alertIds) || isEmpty(tags)) {
+                        throw new BadRequestException("AlertIds and Tags required for adding tags");
+                    }
+                    try {
+                        List<String> alertIdList = Arrays.asList(alertIds.split(","));
+                        Map<String, String> tagsMap = parseTags(tags);
+                        alertsService.addAlertTags(tenantId, alertIdList, tagsMap);
+                        log.debugf("Tagged alertIds:%s, %s", alertIdList, tagsMap);
+                        return ok(resp);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(tags -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> removeTags(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        String alertIds = null;
-        String tagNames = null;
-        if (params.get(PARAM_ALERT_IDS) != null) {
-            alertIds = params.get(PARAM_ALERT_IDS).get(0);
-        }
-        if (params.get(PARAM_TAG_NAMES) != null) {
-            tagNames = params.get(PARAM_TAG_NAMES).get(0);
-        }
-        try {
-            if (!isEmpty(alertIds) && !isEmpty(tagNames)) {
-                Collection<String> ids = Arrays.asList(alertIds.split(","));
-                Collection<String> tags = Arrays.asList(tagNames.split(","));
-                alertsService.removeAlertTags(tenantId, ids, tags);
-                log.debugf("Untagged alertIds:%s, %s", ids, tags);
-                return ok(resp);
-            }
-            return badRequest(resp, "AlertIds and Tags required for removing tags");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> removeTags(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String alertIds = null;
+                    String tagNames = null;
+                    if (params.get(PARAM_ALERT_IDS) != null) {
+                        alertIds = params.get(PARAM_ALERT_IDS).get(0);
+                    }
+                    if (params.get(PARAM_TAG_NAMES) != null) {
+                        tagNames = params.get(PARAM_TAG_NAMES).get(0);
+                    }
+                    if (isEmpty(alertIds) || isEmpty(tagNames)) {
+                        throw new BadRequestException("AlertIds and Tags required for removing tags");
+                    }
+                    try {
+                        Collection<String> ids = Arrays.asList(alertIds.split(","));
+                        Collection<String> tags = Arrays.asList(tagNames.split(","));
+                        alertsService.removeAlertTags(tenantId, ids, tags);
+                        log.debugf("Untagged alertIds:%s, %s", ids, tags);
+                        return tags;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(tags -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> ackAlerts(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        String alertIds = null;
-        String ackBy = null;
-        String ackNotes = null;
-        if (params.get(PARAM_ALERT_IDS) != null) {
-            alertIds = params.get(PARAM_ALERT_IDS).get(0);
-        }
-        if (params.get(PARAM_ACK_BY) != null) {
-            ackBy = params.get(PARAM_ACK_BY).get(0);
-        }
-        if (params.get(PARAM_ACK_NOTES) != null) {
-            ackNotes = params.get(PARAM_ACK_NOTES).get(0);
-        }
-        try {
-            if (!isEmpty(alertIds)) {
-                alertsService.ackAlerts(tenantId, Arrays.asList(alertIds.split(",")), ackBy, ackNotes);
-                log.debugf("Acked alertIds: ", alertIds);
-                return ok(resp);
-            }
-            return badRequest(resp, "AlertIds required for ack");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> ackAlerts(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String alertIds = null;
+                    String ackBy = null;
+                    String ackNotes = null;
+                    if (params.get(PARAM_ALERT_IDS) != null) {
+                        alertIds = params.get(PARAM_ALERT_IDS).get(0);
+                    }
+                    if (params.get(PARAM_ACK_BY) != null) {
+                        ackBy = params.get(PARAM_ACK_BY).get(0);
+                    }
+                    if (params.get(PARAM_ACK_NOTES) != null) {
+                        ackNotes = params.get(PARAM_ACK_NOTES).get(0);
+                    }
+                    if (isEmpty(alertIds)) {
+                        throw new BadRequestException("AlertIds required for ack");
+                    }
+                    try {
+                        alertsService.ackAlerts(tenantId, Arrays.asList(alertIds.split(",")), ackBy, ackNotes);
+                        log.debugf("Acked alertIds: ", alertIds);
+                        return alertIds;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(alertIds -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> deleteAlert(HttpServerResponse resp, String tenantId, String alertId) {
-        try {
-            AlertsCriteria criteria = new AlertsCriteria();
-            criteria.setAlertId(alertId);
-            int numDeleted = alertsService.deleteAlerts(tenantId, criteria);
-            if (1 == numDeleted) {
-                log.debugf("Deleted alertId: ", alertId);
-                return ok(resp);
-            }
-            return notFound(resp, "Alert " + alertId + " doesn't exist for delete");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> deleteAlerts(HttpServerRequest req, HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    AlertsCriteria criteria = buildCriteria(params);
+                    criteria.setAlertId(alertId);
+                    int numDeleted = -1;
+                    try {
+                        numDeleted = alertsService.deleteAlerts(tenantId, criteria);
+                        log.debugf("Alerts deleted: ", numDeleted);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (numDeleted <= 0 && alertId != null) {
+                        throw new ResponseUtil.NotFoundException("Alert " + alertId + " doesn't exist for delete");
+                    }
+                    Map<String, String> deleted = new HashMap<>();
+                    deleted.put("deleted", String.valueOf(numDeleted));
+                    return deleted;
+                }))
+                .flatMap(deleted -> ok(resp,deleted))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> deleteAlerts(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        try {
-            AlertsCriteria criteria = buildCriteria(params);
-            int numDeleted = alertsService.deleteAlerts(tenantId, criteria);
-            log.debugf("Alerts deleted: ", numDeleted);
-            Map<String, String> deleted = new HashMap<>();
-            deleted.put("deleted", String.valueOf(numDeleted));
-            return ok(resp, deleted);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> getAlert(HttpServerRequest req, HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    boolean thin = false;
+                    if (params.get(PARAM_THIN) != null) {
+                        thin = Boolean.valueOf(params.get(PARAM_THIN).get(0));
+                    }
+                    Alert found;
+                    try {
+                        found = alertsService.getAlert(tenantId, alertId, thin);
+                        log.debugf("Alert: ", found);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (found == null) {
+                        throw new ResponseUtil.NotFoundException("alertId: " + alertId + " not found");
+                    }
+                    return found;
+                }))
+                .flatMap(found -> ok(resp, found))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> getAlert(HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
-        try {
-            boolean thin = false;
-            if (params.get(PARAM_THIN) != null) {
-                thin = Boolean.valueOf(params.get(PARAM_THIN).get(0));
-            }
-            Alert found = alertsService.getAlert(tenantId, alertId, thin);
-            if (found != null) {
-                log.debugf("Alert: ", found);
-                return ok(resp, found);
-            }
-            return notFound(resp, "alertId: " + alertId + " not found");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> resolveAlerts(HttpServerRequest req, HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String alertIds = null;
+                    String resolvedBy = null;
+                    String resolvedNotes = null;
+                    if (params.get(PARAM_ALERT_IDS) != null) {
+                        alertIds = params.get(PARAM_ALERT_IDS).get(0);
+                    }
+                    if (alertIds == null) {
+                        alertIds = alertId;
+                    }
+                    if (params.get(PARAM_RESOLVED_BY) != null) {
+                        resolvedBy = params.get(PARAM_RESOLVED_BY).get(0);
+                    }
+                    if (params.get(PARAM_RESOLVED_NOTES) != null) {
+                        resolvedNotes = params.get(PARAM_RESOLVED_NOTES).get(0);
+                    }
+                    if (isEmpty(alertIds)) {
+                        throw new BadRequestException("AlertIds required for resolve");
+                    }
+                    try {
+                        alertsService.resolveAlerts(tenantId, Arrays.asList(alertIds.split(",")), resolvedBy, resolvedNotes, null);
+                        log.debugf("Resolved alertIds: ", alertIds);
+                        return alertIds;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(alertIds -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> resolveAlert(HttpServerResponse resp, String tenantId, String alertId, Map<String, List<String>> params) {
-        String resolvedBy = null;
-        String resolvedNotes = null;
-        if (params.get(PARAM_RESOLVED_BY) != null) {
-            resolvedBy = params.get(PARAM_RESOLVED_BY).get(0);
-        }
-        if (params.get(PARAM_RESOLVED_NOTES) != null) {
-            resolvedNotes = params.get(PARAM_RESOLVED_NOTES).get(0);
-        }
-        try {
-            if (!isEmpty(alertId)) {
-                alertsService.resolveAlerts(tenantId, Arrays.asList(alertId), resolvedBy, resolvedNotes, null);
-                log.debugf("Resolve AlertId: ", alertId);
-                return ok(resp);
-            }
-            return badRequest(resp, "AlertId required for resolve");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
-    }
-
-    Publisher<Void> resolveAlerts(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        String alertIds = null;
-        String resolvedBy = null;
-        String resolvedNotes = null;
-        if (params.get(PARAM_ALERT_IDS) != null) {
-            alertIds = params.get(PARAM_ALERT_IDS).get(0);
-        }
-        if (params.get(PARAM_RESOLVED_BY) != null) {
-            resolvedBy = params.get(PARAM_RESOLVED_BY).get(0);
-        }
-        if (params.get(PARAM_RESOLVED_NOTES) != null) {
-            resolvedNotes = params.get(PARAM_RESOLVED_NOTES).get(0);
-        }
-        try {
-            if (!isEmpty(alertIds)) {
-                alertsService.resolveAlerts(tenantId, Arrays.asList(alertIds.split(",")), resolvedBy, resolvedNotes, null);
-                log.debugf("Resolved alertIds: ", alertIds);
-                return ok(resp);
-            }
-            return badRequest(resp, "AlertIds required for resolve");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
-    }
-
-    Publisher<Void> sendData(HttpServerResponse resp, String tenantId, Collection<Data> datums) {
-        try {
-            if (isEmpty(datums)) {
-                return badRequest(resp, "Data is empty");
-            }
-            datums.stream().forEach(d -> d.setTenantId(tenantId));
-            alertsService.sendData(datums);
-            log.debugf("Datums: ", datums);
-            return ok(resp);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> sendData(HttpServerRequest req, HttpServerResponse resp, String tenantId) {
+        return req
+                .receive()
+                .aggregate()
+                .asString()
+                .publishOn(Schedulers.elastic())
+                .map(json -> {
+                    Collection<Data> parsed;
+                    try {
+                        parsed = collectionFromJson(json, Data.class);
+                        return parsed;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error parsing Datums json: %s. Reason: %s", json, e.toString());
+                        throw new BadRequestException(e.toString());
+                    }
+                })
+                .flatMap(datums -> {
+                    if (isEmpty(datums)) {
+                        throw new BadRequestException("Data is empty");
+                    }
+                    try {
+                        datums.stream().forEach(d -> d.setTenantId(tenantId));
+                        alertsService.sendData(datums);
+                        log.debugf("Datums: ", datums);
+                        return ok(resp);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     AlertsCriteria buildCriteria(Map<String, List<String>> params) {

@@ -12,9 +12,8 @@ import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
 import static org.hawkular.alerts.netty.util.ResponseUtil.checkTags;
 import static org.hawkular.alerts.netty.util.ResponseUtil.extractPaging;
-import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
+import static org.hawkular.alerts.netty.util.ResponseUtil.handleExceptions;
 import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
-import static org.hawkular.alerts.netty.util.ResponseUtil.notFound;
 import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
 import static org.hawkular.alerts.netty.util.ResponseUtil.paginatedOk;
 import static org.hawkular.alerts.netty.util.ResponseUtil.parseTagQuery;
@@ -37,11 +36,16 @@ import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.netty.RestEndpoint;
 import org.hawkular.alerts.netty.RestHandler;
 import org.hawkular.alerts.netty.handlers.EventsWatcher.EventsListener;
+import org.hawkular.alerts.netty.util.ResponseUtil;
+import org.hawkular.alerts.netty.util.ResponseUtil.BadRequestException;
+import org.hawkular.alerts.netty.util.ResponseUtil.InternalServerException;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
 
 import io.netty.handler.codec.http.HttpMethod;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -88,43 +92,19 @@ public class EventsHandler implements RestHandler {
 
         // POST /
         if (method == POST && subpath.equals(ROOT)) {
-            String json = req
-                    .receive()
-                    .aggregate()
-                    .asString()
-                    .block();
-            Event event;
-            try {
-                event = fromJson(json, Event.class);
-            } catch (Exception e) {
-                log.errorf(e, "Error parsing Event json: %s. Reason: %s", json, e.toString());
-                return badRequest(resp, e.toString());
-            }
-            return createEvent(resp, tenantId, event);
+            return createEvent(req, resp, tenantId);
         }
         // POST /data
         if (method == POST && subpath.equals(DATA)) {
-            String json = req
-                    .receive()
-                    .aggregate()
-                    .asString()
-                    .block();
-            Collection<Event> events;
-            try {
-                events = collectionFromJson(json, Event.class);
-            } catch (Exception e) {
-                log.errorf(e, "Error parsing Event json: %s. Reason: %s", json, e.toString());
-                return badRequest(resp, e.toString());
-            }
-            return sendEvents(resp, tenantId, events);
+            return sendEvents(req, resp, tenantId);
         }
         // PUT /tags
         if (method == PUT && subpath.equals(TAGS)) {
-            return addTags(resp, tenantId, params);
+            return addTags(req, resp, tenantId, params);
         }
         // DELETE /tags
         if (method == DELETE && subpath.equals(TAGS)) {
-            return removeTags(resp, tenantId, params);
+            return removeTags(req, resp, tenantId, params);
         }
         // GET /
         if (method == GET && subpath.equals(ROOT)) {
@@ -136,126 +116,199 @@ public class EventsHandler implements RestHandler {
         }
         // PUT /delete
         if (method == PUT && subpath.equals(_DELETE)) {
-            return deleteEvents(resp, tenantId, params);
+            return deleteEvents(req, resp, tenantId, null, params);
         }
         String[] tokens = subpath.substring(1).split(ROOT);
+
+        // DELETE /{eventId}
+        if (method == DELETE && tokens.length == 1) {
+            return deleteEvents(req, resp, tenantId, tokens[0], params);
+        }
+
         // GET /event/{eventId}
         if (method == GET && subpath.startsWith(EVENT) && tokens.length == 2) {
-            return getEvent(resp, tenantId, tokens[1], params);
+            return getEvent(req, resp, tenantId, tokens[1], params);
         }
 
         return badRequest(resp, "Wrong path " + method + " " + subpath);
     }
 
-    Publisher<Void> createEvent(HttpServerResponse resp, String tenantId, Event event) {
-        try {
-            if (event != null) {
-                if (isEmpty(event.getId())) {
-                    return badRequest(resp, "Event with id null.");
-                }
-                if (isEmpty(event.getCategory())) {
-                    return badRequest(resp, "Event with category null.");
-                }
-                event.setTenantId(tenantId);
-                if (null != alertsService.getEvent(tenantId, event.getId(), true)) {
-                    return badRequest(resp, "Event with ID [" + event.getId() + "] exists.");
-                }
-                if (!checkTags(event)) {
-                    return badRequest(resp, "Tags " + event.getTags() + " must be non empty.");
-                }
-                alertsService.addEvents(Collections.singletonList(event));
-                return ok(resp, event);
-            }
-            return badRequest(resp, "Event is null");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> createEvent(HttpServerRequest req, HttpServerResponse resp, String tenantId) {
+        return req
+                .receive()
+                .aggregate()
+                .asString()
+                .publishOn(Schedulers.elastic())
+                .map(json -> {
+                    Event parsed;
+                    try {
+                        parsed = fromJson(json, Event.class);
+                        return parsed;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error parsing Event json: %s. Reason: %s", json, e.toString());
+                        throw new BadRequestException(e.toString());
+                    }
+                })
+                .flatMap(event -> {
+                    if (event == null) {
+                        throw new BadRequestException("Event null.");
+                    }
+                    if (isEmpty(event.getId())) {
+                        throw new BadRequestException("Event with id null.");
+                    }
+                    if (isEmpty(event.getCategory())) {
+                        throw new BadRequestException("Event with category null.");
+                    }
+                    event.setTenantId(tenantId);
+                    if (!checkTags(event)) {
+                        throw new BadRequestException("Tags " + event.getTags() + " must be non empty.");
+                    }
+                    Event found;
+                    try {
+                        found = alertsService.getEvent(tenantId, event.getId(), true);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (found != null) {
+                        throw new BadRequestException("Event with ID [" + event.getId() + "] exists.");
+                    }
+                    try {
+                        alertsService.addEvents(Collections.singletonList(event));
+                        return ok(resp, event);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> sendEvents(HttpServerResponse resp, String tenantId, Collection<Event> events) {
-        try {
-            if (isEmpty(events)) {
-                return badRequest(resp, "Events is empty");
-            }
-            events.stream().forEach(ev -> ev.setTenantId(tenantId));
-            alertsService.sendEvents(events);
-            log.debugf("Events: ", events);
-            return ok(resp);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> sendEvents(HttpServerRequest req, HttpServerResponse resp, String tenantId) {
+        return req
+                .receive()
+                .aggregate()
+                .asString()
+                .publishOn(Schedulers.elastic())
+                .map(json -> {
+                    Collection<Event> parsed;
+                    try {
+                        parsed = collectionFromJson(json, Event.class);
+                        return parsed;
+                    } catch (Exception e) {
+                        log.errorf(e, "Error parsing Event json: %s. Reason: %s", json, e.toString());
+                        throw new BadRequestException(e.toString());
+                    }
+                })
+                .flatMap(events -> {
+                    if (isEmpty(events)) {
+                        throw new BadRequestException("Events is empty");
+                    }
+                    try {
+                        events.stream().forEach(ev -> ev.setTenantId(tenantId));
+                        alertsService.sendEvents(events);
+                        log.debugf("Events: ", events);
+                        return ok(resp);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> addTags(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        String eventIds = null;
-        String tags = null;
-        if (params.get(PARAM_EVENT_IDS) != null) {
-            eventIds = params.get(PARAM_EVENT_IDS).get(0);
-        }
-        if (params.get(PARAM_TAGS) != null) {
-            tags = params.get(PARAM_TAGS).get(0);
-        }
-        try {
-            if (!isEmpty(eventIds) && !isEmpty(tags)) {
-                List<String> eventIdList = Arrays.asList(eventIds.split(","));
-                Map<String, String> tagsMap = parseTags(tags);
-                alertsService.addEventTags(tenantId, eventIdList, tagsMap);
-                log.debugf("Tagged eventIds:%s, %s", eventIdList, tagsMap);
-                return ok(resp);
-            }
-            return badRequest(resp, "EventIds and Tags required for adding tags");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> addTags(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String eventIds = null;
+                    String tags = null;
+                    if (params.get(PARAM_EVENT_IDS) != null) {
+                        eventIds = params.get(PARAM_EVENT_IDS).get(0);
+                    }
+                    if (params.get(PARAM_TAGS) != null) {
+                        tags = params.get(PARAM_TAGS).get(0);
+                    }
+                    if (isEmpty(eventIds) || isEmpty(tags)) {
+                        throw new BadRequestException("EventIds and Tags required for adding tags");
+                    }
+                    try {
+                        List<String> eventIdList = Arrays.asList(eventIds.split(","));
+                        Map<String, String> tagsMap = parseTags(tags);
+                        alertsService.addEventTags(tenantId, eventIdList, tagsMap);
+                        log.debugf("Tagged eventIds:%s, %s", eventIdList, tagsMap);
+                        return tagsMap;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(tagsMap -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> removeTags(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        String eventIds = null;
-        String tagNames = null;
-        if (params.get(PARAM_EVENT_IDS) != null) {
-            eventIds = params.get(PARAM_EVENT_IDS).get(0);
-        }
-        if (params.get(PARAM_TAG_NAMES) != null) {
-            tagNames = params.get(PARAM_TAG_NAMES).get(0);
-        }
-        try {
-            if (!isEmpty(eventIds) && !isEmpty(tagNames)) {
-                Collection<String> ids = Arrays.asList(eventIds.split(","));
-                Collection<String> tags = Arrays.asList(tagNames.split(","));
-                alertsService.removeEventTags(tenantId, ids, tags);
-                log.debugf("Untagged eventsIds:%s, %s", ids, tags);
-                return ok(resp);
-            }
-            return badRequest(resp, "EventIds and Tags required for removing tags");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> removeTags(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    String eventIds = null;
+                    String tagNames = null;
+                    if (params.get(PARAM_EVENT_IDS) != null) {
+                        eventIds = params.get(PARAM_EVENT_IDS).get(0);
+                    }
+                    if (params.get(PARAM_TAG_NAMES) != null) {
+                        tagNames = params.get(PARAM_TAG_NAMES).get(0);
+                    }
+                    if (isEmpty(eventIds) || isEmpty(tagNames)) {
+                        throw new BadRequestException("EventIds and Tags required for removing tags");
+                    }
+                    try {
+                        Collection<String> ids = Arrays.asList(eventIds.split(","));
+                        Collection<String> tags = Arrays.asList(tagNames.split(","));
+                        alertsService.removeEventTags(tenantId, ids, tags);
+                        log.debugf("Untagged eventsIds:%s, %s", ids, tags);
+                        return tags;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(tags -> ok(resp))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     Publisher<Void> findEvents(HttpServerRequest req, HttpServerResponse resp, String tenantId, Map<String, List<String>> params, String uri) {
-        try {
-            Pager pager = extractPaging(params);
-            EventsCriteria criteria = buildCriteria(params);
-            Page<Event> eventPage = alertsService.getEvents(tenantId, criteria, pager);
-            log.debugf("Events: %s", eventPage);
-            if (isEmpty(eventPage)) {
-                return ok(resp, eventPage);
-            }
-            return paginatedOk(req, resp, eventPage, uri);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Pager pager = extractPaging(params);
+                        EventsCriteria criteria = buildCriteria(params);
+                        Page<Event> eventPage = alertsService.getEvents(tenantId, criteria, pager);
+                        log.debugf("Events: %s", eventPage);
+                        return eventPage;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(eventPage -> {
+                    if (isEmpty(eventPage)) {
+                        return ok(resp, eventPage);
+                    }
+                    return paginatedOk(req, resp, eventPage, uri);
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     Publisher<Void> watchEvents(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
@@ -278,40 +331,59 @@ public class EventsHandler implements RestHandler {
         return watcherFlux.window(1).concatMap(w -> resp.sendString(w));
     }
 
-    Publisher<Void> deleteEvents(HttpServerResponse resp, String tenantId, Map<String, List<String>> params) {
-        try {
-            EventsCriteria criteria = buildCriteria(params);
-            int numDeleted = alertsService.deleteEvents(tenantId, criteria);
-            log.debugf("Events deleted: ", numDeleted);
-            Map<String, String> deleted = new HashMap<>();
-            deleted.put("deleted", String.valueOf(numDeleted));
-            return ok(resp, deleted);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> deleteEvents(HttpServerRequest req, HttpServerResponse resp, String tenantId, String eventId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    int numDeleted = -1;
+                    try {
+                        EventsCriteria criteria = buildCriteria(params);
+                        criteria.setEventId(eventId);
+                        numDeleted = alertsService.deleteEvents(tenantId, criteria);
+                        log.debugf("Events deleted: ", numDeleted);
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                    if (numDeleted <= 0 && eventId != null) {
+                        throw new ResponseUtil.NotFoundException("Event " + eventId + " doesn't exist for delete");
+                    }
+                    Map<String, String> deleted = new HashMap<>();
+                    deleted.put("deleted", String.valueOf(numDeleted));
+                    return deleted;
+                }))
+                .flatMap(deleted -> ok(resp, deleted))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
-    Publisher<Void> getEvent(HttpServerResponse resp, String tenantId, String eventId, Map<String, List<String>> params) {
-        try {
-            boolean thin = false;
-            if (params.get(PARAM_THIN) != null) {
-                thin = Boolean.valueOf(params.get(PARAM_THIN).get(0));
-            }
-            Event found = alertsService.getEvent(tenantId, eventId, thin);
-            if (found != null) {
-                log.debugf("Event: ", found);
-                return ok(resp, found);
-            }
-            return notFound(resp, "eventId: " + eventId + " not found");
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+    Publisher<Void> getEvent(HttpServerRequest req, HttpServerResponse resp, String tenantId, String eventId, Map<String, List<String>> params) {
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    boolean thin = false;
+                    if (params.get(PARAM_THIN) != null) {
+                        thin = Boolean.valueOf(params.get(PARAM_THIN).get(0));
+                    }
+                    Event found;
+                    try {
+                        found = alertsService.getEvent(tenantId, eventId, thin);
+                        if (found != null) {
+                            return found;
+                        }
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                    throw new ResponseUtil.NotFoundException("eventId: " + eventId + " not found");
+                }))
+                .flatMap(found -> ok(resp, found))
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     EventsCriteria buildCriteria(Map<String, List<String>> params) {

@@ -7,6 +7,7 @@ import static org.hawkular.alerts.netty.HandlersManager.TENANT_HEADER_NAME;
 import static org.hawkular.alerts.netty.util.ResponseUtil.badRequest;
 import static org.hawkular.alerts.netty.util.ResponseUtil.extractPaging;
 import static org.hawkular.alerts.netty.util.ResponseUtil.getTenants;
+import static org.hawkular.alerts.netty.util.ResponseUtil.handleExceptions;
 import static org.hawkular.alerts.netty.util.ResponseUtil.internalServerError;
 import static org.hawkular.alerts.netty.util.ResponseUtil.isEmpty;
 import static org.hawkular.alerts.netty.util.ResponseUtil.ok;
@@ -30,11 +31,16 @@ import org.hawkular.alerts.engine.StandaloneAlerts;
 import org.hawkular.alerts.log.MsgLogger;
 import org.hawkular.alerts.netty.RestEndpoint;
 import org.hawkular.alerts.netty.RestHandler;
+import org.hawkular.alerts.netty.util.ResponseUtil;
+import org.hawkular.alerts.netty.util.ResponseUtil.BadRequestException;
+import org.hawkular.alerts.netty.util.ResponseUtil.InternalServerException;
 import org.jboss.logging.Logger;
 import org.reactivestreams.Publisher;
 
 import io.netty.handler.codec.http.HttpMethod;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.ipc.netty.http.server.HttpServerRequest;
 import reactor.ipc.netty.http.server.HttpServerResponse;
 
@@ -106,39 +112,57 @@ public class CrossTenantHandler implements RestHandler {
     }
 
     Publisher<Void> findAlerts(HttpServerRequest req, HttpServerResponse resp, Set<String> tenantIds, Map<String, List<String>> params, String uri) {
-        try {
-            Pager pager = extractPaging(params);
-            AlertsCriteria criteria = buildAlertsCriteria(params);
-            Page<Alert> alertPage = alertsService.getAlerts(tenantIds, criteria, pager);
-            log.debugf("Alerts: %s", alertPage);
-            if (isEmpty(alertPage)) {
-                return ok(resp, alertPage);
-            }
-            return paginatedOk(req, resp, alertPage, uri);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Pager pager = extractPaging(params);
+                        AlertsCriteria criteria = buildAlertsCriteria(params);
+                        Page<Alert> alertPage = alertsService.getAlerts(tenantIds, criteria, pager);
+                        log.debugf("Alerts: %s", alertPage);
+                        return alertPage;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(alertPage -> {
+                    if (isEmpty(alertPage)) {
+                        return ok(resp, alertPage);
+                    }
+                    return paginatedOk(req, resp, alertPage, uri);
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     Publisher<Void> findEvents(HttpServerRequest req, HttpServerResponse resp, Set<String> tenantIds, Map<String, List<String>> params, String uri) {
-        try {
-            Pager pager = extractPaging(params);
-            EventsCriteria criteria = buildEventsCriteria(params);
-            Page<Event> eventPage = alertsService.getEvents(tenantIds, criteria, pager);
-            log.debugf("Events: %s", eventPage);
-            if (isEmpty(eventPage)) {
-                return ok(resp, eventPage);
-            }
-            return paginatedOk(req, resp, eventPage, uri);
-        } catch (IllegalArgumentException e) {
-            return badRequest(resp,"Bad arguments: " + e.getMessage());
-        } catch (Exception e) {
-            log.debug(e.getMessage(), e);
-            return internalServerError(resp, e.toString());
-        }
+        return req
+                .receive()
+                .publishOn(Schedulers.elastic())
+                .thenMany(Mono.fromSupplier(() -> {
+                    try {
+                        Pager pager = extractPaging(params);
+                        EventsCriteria criteria = buildEventsCriteria(params);
+                        Page<Event> eventPage = alertsService.getEvents(tenantIds, criteria, pager);
+                        log.debugf("Events: %s", eventPage);
+                        return eventPage;
+                    } catch (IllegalArgumentException e) {
+                        throw new BadRequestException("Bad arguments: " + e.getMessage());
+                    } catch (Exception e) {
+                        log.debug(e.getMessage(), e);
+                        throw new InternalServerException(e.toString());
+                    }
+                }))
+                .flatMap(eventPage -> {
+                    if (isEmpty(eventPage)) {
+                        return ok(resp, eventPage);
+                    }
+                    return paginatedOk(req, resp, eventPage, uri);
+                })
+                .onErrorResumeWith(e -> handleExceptions(resp, e));
     }
 
     Publisher<Void> watchAlerts(HttpServerResponse resp, Set<String> tenantIds, Map<String, List<String>> params) {

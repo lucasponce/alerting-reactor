@@ -79,14 +79,16 @@ public class StandaloneActionPluginRegister {
     }
 
     public static synchronized void stop() {
-        instance.actionListeners.stream().forEach(a -> {
-            try {
-                if (a instanceof StandaloneActionPluginListener) {
-                    ((StandaloneActionPluginListener)a).close();
+        if (instance != null && instance.actionListeners != null) {
+            instance.actionListeners.stream().forEach(a -> {
+                try {
+                    if (a instanceof StandaloneActionPluginListener) {
+                        ((StandaloneActionPluginListener)a).close();
+                    }
+                } catch (Exception e) {
+                    log.debug(e.getMessage(), e);
                 }
-            } catch (Exception e) {
-                log.debug(e.getMessage(), e);
-            }
-        });
+            });
+        }
     }
 }
