@@ -151,6 +151,7 @@ class ClusterITest extends AbstractITestBase {
             assertEquals(200, resp.status)
         }
 
+        logger.info("Feeding data");
 
         for (int i = 0; i < numTriggers; i++) {
 

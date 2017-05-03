@@ -128,7 +128,7 @@ public class AlertsHandler implements RestHandler {
             return ackAlerts(req, resp, tenantId, params);
         }
         // PUT /delete
-        if (method == DELETE && subpath.equals(_DELETE)) {
+        if (method == PUT && subpath.equals(_DELETE)) {
             return deleteAlerts(req, resp, tenantId, null, params);
         }
         // PUT /resolve
@@ -295,7 +295,7 @@ public class AlertsHandler implements RestHandler {
                         Map<String, String> tagsMap = parseTags(tags);
                         alertsService.addAlertTags(tenantId, alertIdList, tagsMap);
                         log.debugf("Tagged alertIds:%s, %s", alertIdList, tagsMap);
-                        return ok(resp);
+                        return tags;
                     } catch (IllegalArgumentException e) {
                         throw new BadRequestException("Bad arguments: " + e.getMessage());
                     } catch (Exception e) {
@@ -360,7 +360,7 @@ public class AlertsHandler implements RestHandler {
                     }
                     try {
                         alertsService.ackAlerts(tenantId, Arrays.asList(alertIds.split(",")), ackBy, ackNotes);
-                        log.debugf("Acked alertIds: ", alertIds);
+                        log.debugf("Acked alertIds: %s", alertIds);
                         return alertIds;
                     } catch (IllegalArgumentException e) {
                         throw new BadRequestException("Bad arguments: " + e.getMessage());
@@ -392,8 +392,8 @@ public class AlertsHandler implements RestHandler {
                     if (numDeleted <= 0 && alertId != null) {
                         throw new ResponseUtil.NotFoundException("Alert " + alertId + " doesn't exist for delete");
                     }
-                    Map<String, String> deleted = new HashMap<>();
-                    deleted.put("deleted", String.valueOf(numDeleted));
+                    Map<String, Integer> deleted = new HashMap<>();
+                    deleted.put("deleted", new Integer(numDeleted));
                     return deleted;
                 }))
                 .flatMap(deleted -> ok(resp,deleted))

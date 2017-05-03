@@ -113,6 +113,7 @@ public class StandaloneAlerts {
         actions.setAlertsContext(alertsContext);
         actions.setDefinitions(definitions);
         actions.setExecutor(executor);
+        actions.setActionsCacheManager(actionsCacheManager);
 
         actionsCacheManager.setDefinitions(definitions);
         actionsCacheManager.setGlobalActionsCache(cacheManager.getCache("globalActions"));
@@ -123,6 +124,7 @@ public class StandaloneAlerts {
         alerts.setIncomingDataManager(incoming);
         alerts.setSession(session);
         alerts.setProperties(properties);
+        alerts.setActionsService(actions);
 
         alertsContext.setPartitionManager(partitionManager);
 
@@ -151,6 +153,9 @@ public class StandaloneAlerts {
         incoming.setPartitionManager(partitionManager);
 
         partitionManager.setDefinitionsService(definitions);
+
+        actionsCacheManager.setDefinitions(definitions);
+        actionsCacheManager.setGlobalActionsCache(cacheManager.getCache("globalActions"));
 
         publishCacheManager.setProperties(properties);
         publishCacheManager.setDefinitions(definitions);
@@ -186,6 +191,7 @@ public class StandaloneAlerts {
             instance.engine.shutdown();
             instance.partitionManager.shutdown();
             instance.cassCluster.shutdown();
+            instance.cacheManager.stop();
         }
     }
 

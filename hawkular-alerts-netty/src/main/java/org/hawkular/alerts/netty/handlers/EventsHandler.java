@@ -351,8 +351,8 @@ public class EventsHandler implements RestHandler {
                     if (numDeleted <= 0 && eventId != null) {
                         throw new ResponseUtil.NotFoundException("Event " + eventId + " doesn't exist for delete");
                     }
-                    Map<String, String> deleted = new HashMap<>();
-                    deleted.put("deleted", String.valueOf(numDeleted));
+                    Map<String, Integer> deleted = new HashMap<>();
+                    deleted.put("deleted", new Integer(numDeleted));
                     return deleted;
                 }))
                 .flatMap(deleted -> ok(resp, deleted))

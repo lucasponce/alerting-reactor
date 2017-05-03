@@ -51,7 +51,7 @@ public class StandaloneActionPluginSender implements ActionPluginSender {
 
     @Override
     public void send(ActionResponseMessage msg) throws Exception {
-        log.debugf("Message received: ", msg);
+        log.debugf("Message received: %s", msg);
         if (msg != null && msg.getPayload().containsKey("action")) {
             String jsonAction = msg.getPayload().get("action");
             Action updatedAction = JsonUtil.fromJson(jsonAction, Action.class);

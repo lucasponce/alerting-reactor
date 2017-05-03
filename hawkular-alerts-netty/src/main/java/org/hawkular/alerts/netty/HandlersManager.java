@@ -65,6 +65,9 @@ public class HandlersManager {
                 }
                 if (endpoints.get(endpoint) != null) {
                     return endpoints.get(endpoint).process(req, resp, tenantId(req), subpath, params);
+                } else {
+                    subpath = subpath.equals(ROOT) ? endpoint : endpoint + subpath;
+                    return endpoints.get(ROOT).process(req, resp, tenantId(req), subpath, params);
                 }
             }
         }

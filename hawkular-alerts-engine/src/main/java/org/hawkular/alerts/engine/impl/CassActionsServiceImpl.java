@@ -99,6 +99,10 @@ public class CassActionsServiceImpl implements ActionsService {
         this.session = session;
     }
 
+    public void setActionsCacheManager(ActionsCacheManager actionsCacheManager) {
+        this.actionsCacheManager = actionsCacheManager;
+    }
+
     @Override
     public void send(Trigger trigger, Event event) {
         if (trigger == null) {

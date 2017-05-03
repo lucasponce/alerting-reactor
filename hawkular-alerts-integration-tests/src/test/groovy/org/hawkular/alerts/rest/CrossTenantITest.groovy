@@ -37,12 +37,35 @@ class CrossTenantITest extends AbstractITestBase {
     static Logger logger = LoggerFactory.getLogger(CrossTenantITest.class)
 
 
+    void cleanEventsAlerts(List<String> tenantIds) {
+        for (String tenantId : tenantIds) {
+            client.headers.put("Hawkular-Tenant", tenantId)
+            def resp = client.put(path: "delete", query: [triggerIds:"test-multiple-tenants"]);
+            assert(200 == resp.status || 404 == resp.status)
+            resp = client.put(path: "events/delete", query: [triggerIds:"test-multiple-tenants"]);
+            assert(200 == resp.status || 404 == resp.status)
+            logger.info("Cleaning tenant $tenantId")
+        }
+        for (String tenantId : tenantIds) {
+            client.headers.put("Hawkular-Tenant", tenantId)
+            def resp = client.get(path: "", query: [triggerIds:"test-multiple-tenants"]);
+            assert(200 == resp.status || 404 == resp.status)
+            logger.info("tenant $tenantId alerts $resp.data.size")
+            resp = client.get(path: "events", query: [triggerIds:"test-multiple-tenants"]);
+            assert(200 == resp.status || 404 == resp.status)
+            logger.info("tenant $tenantId events $resp.data.size")
+        }
+        Thread.sleep(2000)
+    }
+
     void generateAlertsForMultipleTenants(List<String> tenantIds, int numAlerts) {
         for (String tenantId : tenantIds) {
             client.headers.put("Hawkular-Tenant", tenantId)
+
             Trigger testTrigger = new Trigger("test-multiple-tenants", "CrossTenantITest");
             def resp = client.delete(path: "triggers/test-multiple-tenants");
             assert(200 == resp.status || 404 == resp.status)
+
             resp = client.post(path: "triggers", body: testTrigger)
             assertEquals(200, resp.status)
 
@@ -78,9 +101,11 @@ class CrossTenantITest extends AbstractITestBase {
 
     @Test
     void fetchEventsAndAlertsFromMultipleTenants() {
-        def start = System.currentTimeMillis();
-
         List<String> tenantIds = ["tenant1", "tenant2", "tenant3", "tenant4"];
+
+        cleanEventsAlerts(tenantIds)
+
+        def start = System.currentTimeMillis();
 
         def watcherRun = true
         def alertsWatched = 0, eventsWatched = 0, tenant1AlertsWatched = 0, tenant1EventsWatched = 0
@@ -180,6 +205,8 @@ class CrossTenantITest extends AbstractITestBase {
         assertEquals(20, eventsWatched)
         assertEquals(5, tenant1AlertsWatched)
         assertEquals(5, tenant1EventsWatched)
+
+        cleanEventsAlerts(tenantIds)
     }
 
 }
