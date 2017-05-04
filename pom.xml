@@ -121,7 +121,7 @@
         <module>hawkular-alerts-engine</module>
         <module>hawkular-alerts-netty</module>
         <module>hawkular-alerts-integration-tests</module>
-        <!--module>hawkular-alerts-engine-extensions</module-->
+        <module>hawkular-alerts-engine-extensions</module>
         <!--module>hawkular-alerters</module-->
       </modules>
     </profile>

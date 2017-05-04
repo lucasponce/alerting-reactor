@@ -46,7 +46,7 @@ import org.slf4j.LoggerFactory
         DampeningITest.class,
         EventsITest.class,
         EventsLifecycleITest.class,
-        // *TODO Not yet ready this one* EventsAggregationExtensionITest.class,
+        EventsAggregationExtensionITest.class,
         GroupITest.class,
         ImportExportITest.class,
         LifecycleITest.class,

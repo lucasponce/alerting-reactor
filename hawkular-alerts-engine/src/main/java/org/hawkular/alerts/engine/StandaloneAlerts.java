@@ -40,6 +40,9 @@ import org.hawkular.alerts.engine.impl.IncomingDataManagerImpl;
 import org.hawkular.alerts.engine.impl.PartitionManagerImpl;
 import org.hawkular.alerts.engine.impl.PropertiesServiceImpl;
 import org.hawkular.alerts.engine.impl.StatusServiceImpl;
+import org.hawkular.alerts.extensions.CepEngine;
+import org.hawkular.alerts.extensions.CepEngineImpl;
+import org.hawkular.alerts.extensions.EventsAggregationExtension;
 import org.hawkular.alerts.filter.CacheClient;
 import org.infinispan.manager.EmbeddedCacheManager;
 import org.jboss.logging.Logger;
@@ -77,6 +80,8 @@ public class StandaloneAlerts {
     private CacheClient dataIdCache;
     private ActionsCacheManager actionsCacheManager;
     private PublishCacheManager publishCacheManager;
+    private CepEngineImpl cepEngineImpl;
+    private EventsAggregationExtension eventsAggregationExtension;
 
     private StandaloneAlerts() {
         distributed = IspnCacheManager.isDistributed();
@@ -99,6 +104,8 @@ public class StandaloneAlerts {
         incoming = new IncomingDataManagerImpl();
         actionsCacheManager = new ActionsCacheManager();
         publishCacheManager = new PublishCacheManager();
+        cepEngineImpl = new CepEngineImpl();
+        eventsAggregationExtension = new EventsAggregationExtension();
 
         executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(), threadFactory);
 
@@ -165,6 +172,15 @@ public class StandaloneAlerts {
         status.setPartitionManager(partitionManager);
         status.setSession(session);
 
+        cepEngineImpl.setAlertsService(alerts);
+        cepEngineImpl.setExecutor(executor);
+
+        eventsAggregationExtension.setCep(cepEngineImpl);
+        eventsAggregationExtension.setDefinitions(definitions);
+        eventsAggregationExtension.setExtensions(extensions);
+        eventsAggregationExtension.setProperties(properties);
+        eventsAggregationExtension.setExecutor(executor);
+
         // Initialization needs order
 
         alerts.init();
@@ -176,6 +192,7 @@ public class StandaloneAlerts {
         publishCacheManager.init();
         extensions.init();
         engine.initServices();
+        eventsAggregationExtension.init();
     }
 
     private static synchronized void init() {
