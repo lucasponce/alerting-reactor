@@ -16,12 +16,19 @@
  */
 package org.hawkular.alerts.rest
 
-import com.icegreen.greenmail.util.GreenMail
-import com.icegreen.greenmail.util.ServerSetup
+import groovyx.net.http.ContentType
+import groovyx.net.http.RESTClient
 import org.junit.AfterClass
+import org.junit.Before
 import org.junit.BeforeClass
 import org.junit.runner.RunWith
-import org.junit.runners.Suite;
+import org.junit.runners.Suite
+
+import com.icegreen.greenmail.util.GreenMail
+import com.icegreen.greenmail.util.ServerSetup
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
 
 /**
  * Group ITest on a suite to have better control of execution
@@ -39,7 +46,7 @@ import org.junit.runners.Suite;
         DampeningITest.class,
         EventsITest.class,
         EventsLifecycleITest.class,
-        EventsAggregationExtensionITest.class,
+        // *TODO Not yet ready this one* EventsAggregationExtensionITest.class,
         GroupITest.class,
         ImportExportITest.class,
         LifecycleITest.class,
@@ -47,10 +54,31 @@ import org.junit.runners.Suite;
         TriggersITest.class
 ])
 class IntegrationSuite {
-
+    static Logger log = LoggerFactory.getLogger(IntegrationSuite.class)
     static TEST_SMTP_HOST = "localhost";
     static TEST_SMTP_PORT = 2525;
+    static baseURI = System.getProperty('hawkular.base-uri') ?: 'http://127.0.0.1:8080/hawkular/alerts/'
     static GreenMail smtpServer;
+    static RESTClient client
+
+    @BeforeClass
+    static void checkStatus() {
+        client = new RESTClient(baseURI, ContentType.JSON)
+        def tries = 100
+        def sleep = 10
+        def status = "INIT"
+        def resp
+        while (tries > 0 && status != "STARTED") {
+            try {
+                resp = client.get(path: "status")
+                status = resp.data.status
+            } catch (Exception e) {
+                log.info("[" + tries + "] Not yet ready [" + e.toString() + "] Sleeping [" + sleep + "s]")
+            }
+            tries--
+            Thread.sleep(sleep * 1000);
+        }
+    }
 
     @BeforeClass
     static void initSmtpServer() {

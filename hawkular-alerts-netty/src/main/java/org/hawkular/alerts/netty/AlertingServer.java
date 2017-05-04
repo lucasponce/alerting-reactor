@@ -33,12 +33,13 @@ public class AlertingServer implements AlertingServerMBean {
         String bindAdress = AlertProperties.getProperty(BIND_ADDRESS, BIND_ADDRESS_DEFAULT);
         Integer port = Integer.valueOf(AlertProperties.getProperty(PORT, PORT_DEFAULT));
 
-        log.infof("Starting Server at http://%s:%s", bindAdress, port);
         try {
             StandaloneAlerts.start();
+            StandaloneActionPluginRegister.start();
             handlers = new HandlersManager();
             handlers.start();
-            StandaloneActionPluginRegister.start();
+
+            log.infof("Starting Server at http://%s:%s", bindAdress, port);
             context = HttpServer.create(bindAdress, port)
                     .newRouter(r -> r
                             .route(req -> true, (req, resp) -> handlers.process(req, resp)))

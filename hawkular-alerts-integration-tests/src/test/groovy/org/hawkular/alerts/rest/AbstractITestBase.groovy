@@ -22,6 +22,8 @@ import org.junit.BeforeClass
 
 import groovyx.net.http.ContentType
 import groovyx.net.http.RESTClient
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -45,7 +47,6 @@ class AbstractITestBase {
 
         client = new RESTClient(baseURI, ContentType.JSON)
         // this prevents 404 from being wrapped in an Exception, just return the response, better for testing
-        client.handler.failure = { it }
         /*
         client.handler.failure = { resp, data ->
             resp.setData(data)
@@ -64,14 +65,7 @@ class AbstractITestBase {
          */
         client.defaultRequestHeaders.Authorization = "Basic amRvZTpwYXNzd29yZA=="
         client.headers.put("Hawkular-Tenant", testTenant)
-
-        def resp = client.get(path: "status")
-        def tries = 100
-        while (tries > 0 && resp.data.status != "STARTED") {
-            Thread.sleep(500);
-            resp = client.get(path: "status")
-            tries--
-        }
+        client.handler.failure = { it }
     }
 
     static String nextTenantId() {

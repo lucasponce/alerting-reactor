@@ -4,9 +4,6 @@
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{1.} - %msg%n"/>
         </Console>
-      <File name="File" fileName="target/AlertingServer.log">
-        <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{1.} - %msg%n"/>
-      </File>
     </Appenders>
     <Loggers>
         <Logger name="com.datastax" level="warn" />
@@ -14,12 +11,11 @@
         <Logger name="io.netty" level="warn" />
         <Logger name="org.drools" level="warn" />
         <Logger name="org.jboss" level="warn" />
-        <Logger name="org.hawkular" level="debug" />
+        <Logger name="org.hawkular" level="info" />
         <Logger name="org.infinispan" level="warn" />
         <Logger name="reactor" level="warn" />
         <Root level="debug">
             <AppenderRef ref="Console"/>
-            <AppenderRef ref="File"/>
         </Root>
     </Loggers>
 </Configuration>

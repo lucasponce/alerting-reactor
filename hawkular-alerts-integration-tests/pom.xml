@@ -75,13 +75,14 @@
       <scope>test</scope>
     </dependency>
 
+    <!--
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-simple</artifactId>
       <version>${version.org.slf4j}</version>
       <scope>test</scope>
     </dependency>
-
+    -->
     <dependency>
       <groupId>log4j</groupId>
       <artifactId>log4j</artifactId>
@@ -155,13 +156,23 @@
             <artifactId>exec-maven-plugin</artifactId>
             <executions>
               <execution>
+                <id>start-cassandra-server</id>
+                <phase>pre-integration-test</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <executable>${project.basedir}/run-cassandra.sh</executable>
+                </configuration>
+              </execution>
+              <execution>
                 <id>start-alerting-server</id>
                 <phase>pre-integration-test</phase>
                 <goals>
                   <goal>exec</goal>
                 </goals>
                 <configuration>
-                  <executable>run.sh</executable>
+                  <executable>${project.basedir}/run.sh</executable>
                 </configuration>
               </execution>
               <execution>
@@ -171,7 +182,17 @@
                   <goal>exec</goal>
                 </goals>
                 <configuration>
-                  <executable>stop.sh</executable>
+                  <executable>${project.basedir}/stop.sh</executable>
+                </configuration>
+              </execution>
+              <execution>
+                <id>stop-cassandra-server</id>
+                <phase>post-integration-test</phase>
+                <goals>
+                  <goal>exec</goal>
+                </goals>
+                <configuration>
+                  <executable>${project.basedir}/stop-cassandra.sh</executable>
                 </configuration>
               </execution>
             </executions>
@@ -183,7 +204,7 @@
             <configuration>
               <tasks>
                 <echo message="Warm up" />
-                <sleep seconds="20" />
+                <sleep seconds="2" />
               </tasks>
             </configuration>
             <executions>
@@ -210,8 +231,7 @@
                 </goals>
                 <configuration>
                   <includes>
-                    <include>org/hawkular/alerts/rest/TenantITest.class</include>
-                    <include>org/hawkular/alerts/rest/TriggersITest.class</include>
+                    <include>org/hawkular/alerts/rest/IntegrationSuite.class</include>
                   </includes>
                 </configuration>
               </execution>
