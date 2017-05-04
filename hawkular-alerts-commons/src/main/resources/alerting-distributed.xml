@@ -22,7 +22,7 @@
       <transaction mode="BATCH"/>
     </replicated-cache>
     <replicated-cache name="schema" mode="SYNC">
-      <transaction mode="NON_XA"/>
+      <transaction mode="NON_XA" locking="PESSIMISTIC"/>
       <locking acquire-timeout="100000" />
     </replicated-cache>
     <replicated-cache name="globalActions" mode="ASYNC">

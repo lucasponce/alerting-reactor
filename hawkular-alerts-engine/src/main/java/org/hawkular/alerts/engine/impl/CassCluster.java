@@ -289,8 +289,14 @@ public class CassCluster {
     }
 
     private void initSchemeDistributed() throws IOException {
-        schemaCache.getAdvancedCache().lock(SCHEMA);
-        initScheme();
+        try {
+            schemaCache.getAdvancedCache().getTransactionManager().begin();
+            schemaCache.getAdvancedCache().lock(SCHEMA);
+            initScheme();
+            schemaCache.getAdvancedCache().getTransactionManager().rollback();
+        } catch (Exception e) {
+            log.error(e);
+        }
     }
 
     private void initScheme() throws IOException {
