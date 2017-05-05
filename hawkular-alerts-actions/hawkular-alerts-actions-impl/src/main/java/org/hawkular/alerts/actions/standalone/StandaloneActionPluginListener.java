@@ -42,7 +42,6 @@ public class StandaloneActionPluginListener implements ActionListener {
     private final MsgLogger log = Logger.getMessageLogger(MsgLogger.class,
             StandaloneActionPluginListener.class.getName());
 
-    private InitialContext ctx;
     private DefinitionsService definitions;
 
     ExecutorService executorService;
@@ -52,7 +51,7 @@ public class StandaloneActionPluginListener implements ActionListener {
     public StandaloneActionPluginListener(Map<String, ActionPluginListener> plugins) {
         this.plugins = plugins;
         int numThreads = Integer.parseInt(System.getProperty(NUM_THREADS, "10"));
-        executorService = Executors.newFixedThreadPool(numThreads, new StandaloneThreadFactory());
+        executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors(), new StandaloneThreadFactory());
     }
 
     @Override

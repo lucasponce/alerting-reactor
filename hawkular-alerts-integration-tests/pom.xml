@@ -116,9 +116,6 @@
 
     <profile>
       <id>itest</id>
-      <properties>
-
-      </properties>
       <dependencies>
         <dependency>
           <groupId>org.hawkular.alerts</groupId>
